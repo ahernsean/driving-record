@@ -47,11 +47,6 @@ h2 { font-size: 1.2rem; }
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
 }
 .progress-heading h1 { margin: 0; font-size: 1.35rem; }
-.progress-info {
-  display: grid; place-items: center; width: 1.8rem; height: 1.8rem;
-  border: 2px solid var(--muted); border-radius: 50%; color: var(--muted);
-  font-size: .85rem; font-weight: 800;
-}
 .progress-layout {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(9.5rem, 1fr);
   align-items: center; gap: 1rem; margin-top: .75rem;
