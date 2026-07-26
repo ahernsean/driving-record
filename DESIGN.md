@@ -69,6 +69,7 @@ trail.
 
 Use a small Python application with:
 
+- `Python 3.13`
 - `FastAPI` for the HTTP server and JSON/web handlers
 - `SQLite` for the authoritative database
 - server-rendered HTML templates for the UI
@@ -82,6 +83,35 @@ Why this stack:
 - Server-rendered pages reduce complexity and make Tailscale deployment simple
 - Python has mature timezone and astronomy libraries
 
+### Supported platform and dependencies
+
+The production baseline is:
+
+- Rocky Linux 9.8
+- CPython 3.13.14
+- Python `sqlite3` linked against SQLite 3.34.1 or newer
+- FastAPI 0.139.2
+- Uvicorn 0.51.0
+- Jinja2 3.1.6
+- python-multipart 0.0.32
+- Astral 3.2
+
+The implementation must commit separate runtime and test lock files containing
+all transitive versions and package hashes. `./driving-log bootstrap` creates a
+repo-local `.venv` with `python3.13` and installs only those locked artifacts.
+Production must not install from an unbounded version range.
+
+The test baseline is pytest 9.1.1, HTTPX 0.28.1, and Playwright 1.61.0, also
+hash-locked. Browser support is Safari and Chrome on iOS 18 and 19, plus the
+current and immediately previous desktop Chrome releases. Automated phone
+coverage uses Playwright WebKit at representative iPhone viewport sizes. A
+release also requires a smoke test in Chrome on an actual iPhone because all
+iOS browsers use WebKit but browser chrome and input behavior still differ.
+
+Dependency upgrades are explicit commits that regenerate lock files and run the
+full test suite. The application records its release and schema version so
+`doctor` can report the exact deployed combination.
+
 ## Data Model
 
 ### 1. `drives`
@@ -90,7 +120,9 @@ Canonical stored record for a completed drive.
 
 Fields:
 
-- `id` UUID or integer primary key
+- `id` UUID primary key, stable across CSV export/import
+- `request_id` nullable UUID, unique idempotency key for manual creation
+- `live_drive_id` nullable UUID with a unique constraint
 - `driver_name`
 - `supervisor_name`
 - `supervisor_dl_number`
@@ -104,10 +136,12 @@ Fields:
 - `weather` free text
 - `notes` free text
 - `source` enum-like text:
-  `manual`, `live_drive`, `seed_pdf`, `seed_log_txt`, `microsoft_form`, `csv_import`
+  `manual`, `live_drive`, `seed_pdf`, `seed_log_txt`, `microsoft_form`
 - `source_reference` original source locator, such as file name plus row/index
+- `import_batch_id` nullable foreign key
 - `created_at`
 - `updated_at`
+- `version` integer incremented on every edit
 - `deleted_at` nullable soft-delete timestamp
 
 Rules:
@@ -115,10 +149,18 @@ Rules:
 - `duration_minutes = ended_at_local - started_at_local`
 - `duration_minutes = day_minutes + night_minutes`
 - only non-deleted rows count toward totals
+- retrying a create with the same `request_id` and payload returns the existing
+  drive; reusing it with a different payload returns a conflict
+- CSV import preserves the original `source` and uses `import_batch_id` to
+  record how the row entered this database
+- edits preserve `id`, source provenance, and creation time; they use the
+  submitted `version` for optimistic concurrency and return a conflict rather
+  than overwriting a newer edit
 
 ### 2. `drive_warnings`
 
-Stores non-fatal validation findings attached to a drive.
+Stores non-fatal source-quality findings and warning acknowledgements that
+cannot be reconstructed from canonical drive fields.
 
 Fields:
 
@@ -130,16 +172,17 @@ Fields:
 
 Examples:
 
-- `long_drive`
-- `crosses_midnight`
-- `overlaps_existing_drive`
-- `exceeds_weekly_cap`
 - `seed_ambiguous_duration`
 - `seed_possible_duplicate`
 
+Intrinsic warnings such as long duration and crossing midnight, and relational
+warnings such as overlaps and weekly overage, are derived from the current
+non-deleted drive set. They must not be persisted as authoritative warning rows
+because imports and deletions can invalidate them.
+
 ### 3. `live_drives`
 
-Represents a drive that has started but not yet been finalized.
+Represents the durable lifecycle of a live drive.
 
 Fields:
 
@@ -148,13 +191,35 @@ Fields:
 - `supervisor_name`
 - `started_at_local`
 - `started_from` such as `web`
+- `status`: `active`, `completed`, or `cancelled`
+- `completed_drive_id` nullable unique foreign key
+- `finalization_payload_hash` nullable
+- `finalized_at` nullable
 - `created_at`
 
 Constraints:
 
-- only one active live drive at a time for this household
-- ending a live drive creates a row in `drives`
-- canceling a live drive deletes or archives this row without creating a drive
+- a partial unique index permits only one `status = active` row
+- a completed drive's `live_drive_id` and the live row's
+  `completed_drive_id` provide a stable one-to-one identity
+- completed and cancelled live rows remain as audit history
+
+Ending a live drive is one `BEGIN IMMEDIATE` SQLite transaction:
+
+1. Read the live row by its stable UUID.
+2. If it is active, validate the end payload, insert exactly one completed
+   drive, and mark the live row completed with that drive ID and payload hash.
+3. If it is already completed with the same payload hash, return the existing
+   drive as a successful retry.
+4. If it is completed with different data, or cancelled, return a conflict.
+5. Commit both changes together.
+
+If the process or host fails before commit, SQLite rolls back both changes. If
+it fails after commit but before the phone receives the response, retry returns
+the same completed drive. Cancel similarly changes `active` to `cancelled` in
+one transaction; repeated cancel is successful, while cancel after completion
+is a conflict. After restart, an active row remains visible on the dashboard
+with its original start time.
 
 ### 4. `import_batches`
 
@@ -165,14 +230,17 @@ Fields:
 - `id`
 - `source_type`
 - `source_name`
+- `content_sha256` unique
+- `format_version`
 - `imported_at`
-- `raw_snapshot_path` or stored blob reference
+- `raw_snapshot` compressed blob
 - `status`
 - `summary_json`
 
 ### 5. `import_rows`
 
-Optional but useful for auditability.
+Required row-level audit history for every seed, CSV, and future Microsoft
+import.
 
 Fields:
 
@@ -184,6 +252,26 @@ Fields:
 - `result_drive_id` nullable
 - `status`
 - `error_message` nullable
+
+### 6. `configuration`
+
+Stores non-secret application settings required to reproduce calculations,
+including location, timezone, calendar-week convention, driver name, and
+optional supervisor defaults. Secrets and Microsoft credentials remain outside
+the database.
+
+### 7. `audit_events`
+
+Records security-neutral mutations and operational events such as drive
+creation/deletion, live-drive finalization/cancellation, imports, archive
+creation, migrations, and restores. It stores IDs and outcomes but never
+supervisor license numbers or credentials.
+
+Every browser mutation carries a generated request UUID stored uniquely with
+its audit event in the same transaction. Repeating the same request and payload
+returns the prior result; reusing the UUID with a different action or payload
+returns a conflict. This covers response-loss retries for edits and deletions
+as well as creation.
 
 ## Seed Import Strategy
 
@@ -305,14 +393,25 @@ Recommended behavior:
 - keep `total_minutes` as the sum of every valid drive
 - use `total_minutes` for the primary 60-hour progress gauge
 - compute each week's total without altering the recorded drives or grand total
-- when a drive takes a week over 10 hours, save an `exceeds_weekly_cap` warning
-  that identifies the week, its total, and the overage amount
+- derive over-cap weeks from all current non-deleted drives whenever totals are
+  read
+- after every create, import, or deletion, return the newly computed week total
+  and overage in the mutation response
 - show over-cap weeks prominently on the dashboard and drive list
 - allow the drive to be saved after the warning is acknowledged
 
+The query returns the week boundaries, total minutes, and
+`max(0, total_minutes - 600)` overage. It also identifies all drives in that
+week and the first drive in chronological order that moves the cumulative
+weekly total above 600 minutes. Because this state is derived rather than
+stored, deleting an earlier drive or importing a historical drive immediately
+moves or removes the warning correctly.
+
 The supplied form does not define the week boundary. Use a documented calendar
-week convention in version 1 and keep that convention configurable. Before
-final DMV submission, any week over 10 hours should be reviewed manually.
+week convention in version 1 and keep that convention configurable. The default
+is Sunday 12:00 a.m. through the following Sunday 12:00 a.m. in
+`America/New_York`, grouped by local drive start date. Before final DMV
+submission, any week over 10 hours should be reviewed manually.
 
 ## Web Interface
 
@@ -350,6 +449,7 @@ Capabilities:
 - filter by month
 - filter rows with warnings only
 - tap a drive to open details
+- edit an existing drive from its details view
 - delete an incorrect drive from the details view
 
 Displayed row summary:
@@ -398,7 +498,31 @@ On submit:
 - show computed day/night split
 - show warnings before final confirm if needed
 
-### 4. Live drive
+### 4. Edit drive
+
+The edit form reuses the large manual-entry controls and allows correction of:
+
+- date
+- start time
+- end time
+- supervisor name
+- supervisor DL number and state
+- road type
+- weather
+- notes
+
+Saving an edit occurs in one transaction. It validates the submitted record
+version, reruns hard validation, recomputes duration and day/night minutes, and
+updates the drive without changing its stable ID or provenance. The response
+includes newly derived long-drive, midnight, overlap, and weekly-overage
+warnings. An `audit_events` row records the before and after values with private
+license data redacted. If another session edited the drive first, return a
+conflict and show both versions for deliberate reconciliation.
+
+Repeating a completed edit with the same request UUID returns the prior result
+instead of applying the edit twice.
+
+### 5. Live drive
 
 Entry point:
 
@@ -408,10 +532,19 @@ At start:
 
 - record current local timestamp
 - optionally capture default supervisor immediately
+- submit a browser-generated UUID so a repeated tap or retried request returns
+  the same live drive
 
 During active drive:
 
 - dashboard shows elapsed time and `End drive` / `Cancel drive`
+- refreshing the page or restarting the service recovers the stored active
+  drive rather than starting a new timer
+- the active drive is household/server state, not browser-session state; its
+  ownership must not depend on a cookie, tab, IP address, Tailscale address, or
+  in-memory process object
+- every authorized dashboard request queries SQLite for the single active row
+  and reconstructs elapsed time from `started_at_local`
 
 End flow:
 
@@ -420,27 +553,52 @@ End flow:
 - prompt only for remaining metadata:
   `road_type`, `weather`, `notes`, optional supervisor confirmation
 - show warnings and computed totals before final save
+- submit to the stable live-drive URL; duplicate submissions return the same
+  completed drive
+- default the end timestamp to the successful end request time, but allow it to
+  be corrected before confirmation when reconnection or reauthentication
+  delayed the request after the car stopped
 
 Cancel flow:
 
 - tap `Cancel drive`
 - require confirmation
-- remove the active live drive without creating a completed drive
+- mark the active live drive cancelled without creating a completed drive
+- repeat submissions return the already-cancelled result
 
-### 5. Import/export pages
+Required reconnect scenario:
+
+1. Start a live drive from an iPhone.
+2. Allow the browser to be reaped and Tailscale to disconnect.
+3. Reauthenticate to Tailscale from a new network address and open a new browser
+   session.
+4. The dashboard must show the same active drive, original start time, and
+   reconstructed elapsed timer with working `End drive` and `Cancel drive`
+   controls.
+
+The same outcome is required if the web service or Rocky host restarts while
+the phone is disconnected.
+
+### 6. Import/export pages
 
 Web actions:
 
 - export all non-deleted drives to CSV
 - import CSV backup
+- create and download a full-state archive
+- upload and verify a full-state archive; restoration requires a separate,
+  explicit confirmation
 - show import summary with created rows, skipped rows, warnings, and failures
 
-## CSV Format
+## CSV Drive Log Backup
 
-The CSV should be a stable archival format, not a UI dump.
+CSV is the human-readable, portable backup of the current completed-drive log.
+It is not a complete application archive and does not include deleted drives,
+live-drive state, configuration, import audit rows, or audit events.
 
 Recommended columns:
 
+- `format_version`
 - `id`
 - `driver_name`
 - `supervisor_name`
@@ -456,21 +614,80 @@ Recommended columns:
 - `notes`
 - `source`
 - `source_reference`
-- `deleted_at`
 
 Rules:
 
 - export in UTF-8
 - use ISO-like local datetime strings with timezone offset
-- import should validate schema version and report row-level errors
-- import should support either create-only mode or replace-from-backup mode
+- export only non-deleted completed drives
+- preserve each drive's stable UUID and original provenance
+- validate `format_version`, headers, every row, and all duplicate IDs before
+  making any database change
+- calculate a SHA-256 hash for the exact uploaded file and store it as the
+  unique `import_batches.content_sha256`
+- perform the entire import and its audit rows in one transaction
+- if the same completed file is imported again, return the original import
+  summary without creating rows
+- if a drive UUID already exists with identical canonical content, skip it
+- if a drive UUID exists with different content, abort the whole import and
+  report the conflict; never silently overwrite
+- if power or process failure interrupts import, the transaction rolls back and
+  retry is safe
 
-For safety, first version should implement:
+CSV import is append/reconcile only. Full replacement belongs to the full-state
+restore workflow below.
 
-- `export`
-- `import append`
+## Full-State Archives
 
-Add full replace/restore only after a backup/restore workflow is tested.
+A full-state archive is the disaster-recovery backup. It contains a consistent
+SQLite snapshot with completed and soft-deleted drives, source warnings, active
+and finalized live-drive rows, configuration, import raw snapshots and audit
+rows, schema history, and application audit events. Credentials remain external
+and are documented separately.
+
+Storage defaults:
+
+- state directory: `/home/ahern/.local/state/driving-log`
+- live database:
+  `/home/ahern/.local/state/driving-log/driving-log.sqlite3`
+- archive directory: `/home/ahern/.local/state/driving-log/archives`
+- directory mode `0700`; database and archives mode `0600`
+
+The user-level systemd units express `/home/ahern` with the `%h` specifier, but
+the application resolves and reports the absolute path shown above.
+
+Archive creation:
+
+1. Use Python's SQLite online backup API to write a temporary snapshot without
+   copying the live database or WAL files directly.
+2. Run `PRAGMA quick_check` against the snapshot.
+3. Record archive format, application version, schema version, creation time,
+   database size, and the snapshot's SHA-256 in a manifest.
+4. Package the snapshot and manifest into one versioned archive bundle.
+5. `fsync` the bundle, atomically rename it into place, then `fsync` the archive
+   directory.
+6. Mark the archive verified only after reopening the bundle, checking the
+   snapshot against the manifest hash, and running `quick_check`.
+
+`driving-log-archive.timer` creates and verifies one archive daily. Retain the
+most recent 14 daily archives and 8 weekly archives. A verified pre-migration
+archive is mandatory and is not removed by ordinary daily retention.
+
+Restore procedure:
+
+1. Stop the web service and acquire the application lock.
+2. Verify the archive hash, archive format, SQLite integrity, and supported
+   schema before touching the live database.
+3. Move the current database and any WAL/SHM files to a timestamped quarantine
+   directory; never overwrite the only copy.
+4. Restore to a temporary file in the state directory, set permissions,
+   `fsync`, and atomically rename it to the live database path.
+5. Start the service, run readiness and `quick_check`, and retain the quarantine
+   copy until the restored service is manually accepted.
+
+The automated integration suite must prove that a restored archive reproduces
+all authoritative tables, including an active live drive, deleted rows,
+configuration, imports, and audits.
 
 ## CLI Interface
 
@@ -478,22 +695,44 @@ Provide simple commands runnable from this repo.
 
 Recommended command surface:
 
+- `./driving-log bootstrap`
 - `./driving-log serve`
 - `./driving-log start`
 - `./driving-log stop`
 - `./driving-log restart`
 - `./driving-log status`
+- `./driving-log doctor [--json]`
+- `./driving-log db check`
+- `./driving-log live status`
+- `./driving-log imports status`
 - `./driving-log seed`
-- `./driving-log export --out backup.csv`
-- `./driving-log import --in backup.csv`
+- `./driving-log csv export --out driving-log.csv`
+- `./driving-log csv import --in driving-log.csv`
+- `./driving-log archive create`
+- `./driving-log archive list`
+- `./driving-log archive verify [ARCHIVE]`
+- `./driving-log archive restore ARCHIVE --confirm`
 
-Implementation options:
+Use a small shell entrypoint plus the standard-library `argparse` module. The
+commands are thin wrappers around the application's real service, import, and
+archive logic so behavior stays consistent between CLI and web.
 
-- a small shell wrapper that calls the Python module
-- or a Python CLI via `typer`
+`doctor` is read-only and reports:
 
-The commands should be thin wrappers around the app's real service/import logic
-so behavior stays consistent between CLI and web.
+- application, Python, SQLite, and schema versions
+- configured and resolved database/archive paths and file permissions
+- effective SQLite journal, synchronous, foreign-key, and busy-timeout settings
+- `PRAGMA quick_check` result
+- active live-drive ID and age, without private supervisor details
+- incomplete or failed import batches
+- newest full archive age and latest verification result
+- filesystem free space
+- user-service state and recent restart count
+- local HTTP liveness/readiness independently from Tailscale Serve status
+- Tailscale forwarding configuration and reachability
+
+This separation makes it clear whether an outage is in the process, database,
+local HTTP service, or Tailscale forwarding layer.
 
 ## Hosting And Persistence
 
@@ -507,6 +746,8 @@ Recommended runtime:
 - bind the app locally on a non-80 port such as `127.0.0.1:8765`
 - expose it through Tailscale Serve or an equivalent forwarding rule
 - keep the internal app port configurable
+- keep all mutable state outside the Git worktree at
+  `/home/ahern/.local/state/driving-log`
 
 Persistence across reboot:
 
@@ -517,7 +758,60 @@ Persistence across reboot:
 Recommended service units:
 
 - `driving-log-web.service`
+- `driving-log-archive.service`
+- `driving-log-archive.timer`
 - optional `driving-log-import.timer` later for scheduled form ingestion
+
+### SQLite durability
+
+Every database connection must enable and verify:
+
+- `PRAGMA journal_mode = WAL`
+- `PRAGMA synchronous = FULL`
+- `PRAGMA foreign_keys = ON`
+- a finite `busy_timeout`
+
+All mutations use explicit transactions. Multi-row operations, imports,
+live-drive transitions, warning acknowledgements, and audit events commit as
+one unit. Write transactions use `BEGIN IMMEDIATE` when serialization is needed.
+The service must never copy a live SQLite file as a backup.
+
+On every startup:
+
+1. Resolve and log the exact database path.
+2. Open SQLite and apply connection pragmas.
+3. Run `PRAGMA quick_check`.
+4. Verify the schema version and migration checksums.
+5. Apply required migrations only after creating a verified pre-migration
+   archive.
+6. Run `quick_check` again before the readiness endpoint succeeds.
+
+If integrity checking, a migration, or post-migration checking fails, the
+service refuses writes and readiness fails. It logs the recovery command and
+archive candidates but never silently restores or discards the database.
+
+### Schema migrations
+
+Maintain an ordered `schema_migrations` table with version, name, checksum, and
+applied timestamp. Each migration runs transactionally; failure rolls back and
+prevents service startup. The application refuses to open a schema newer than
+it understands. Downgrades are not automatic and require restoring a compatible
+pre-migration archive.
+
+### Health and logging
+
+Expose localhost health endpoints:
+
+- `/health/live`: process event loop is responsive
+- `/health/ready`: database opens, schema is supported, integrity check passed,
+  and migrations are complete
+
+Emit one-line structured JSON logs to stdout/stderr for journald. Include event
+name, timestamp, severity, request ID, relevant record IDs, duration, and
+outcome. Exclude supervisor license numbers, credentials, raw import contents,
+and other private form data. `./driving-log status` shows concise service state;
+`doctor` performs the deeper read-only checks. Operators can inspect full logs
+with `journalctl --user-unit driving-log-web.service`.
 
 ## Microsoft Forms / Spreadsheet Ingestion
 
@@ -583,7 +877,8 @@ in environment variables or a local config file excluded from version control.
 
 ## Reporting / DMV Export
 
-In addition to CSV backup, the app should produce a DMV-friendly view:
+In addition to CSV drive-log backup and full-state archives, the app should
+produce a DMV-friendly view:
 
 - chronological table matching the `DL-4A` columns
 - total day hours
@@ -596,6 +891,88 @@ Future enhancement:
 
 That is not required for the authoritative-record design, but the data model
 should support it directly.
+
+## Test And Release Strategy
+
+### Unit tests
+
+Use deterministic clocks and fixed Apex coordinates. Cover:
+
+- duration validation at zero, negative, 5 hours, and just over 5 hours
+- sunrise minus 15 minutes and sunset plus 15 minutes boundary behavior
+- drives entirely in day or night and drives split across either boundary
+- spring DST gaps and fall DST folds in `America/New_York`
+- standard-time and daylight-time dates
+- midnight crossing and end-before-start behavior
+- overlap creation and removal after soft deletion
+- calendar-week boundaries, exactly 600 minutes, first minute of overage,
+  multiple over-cap drives, historical import, and deletion-driven recomputation
+- CSV format versions, duplicate file hashes, identical UUID retries,
+  conflicting UUIDs, and all-or-nothing row validation
+- seed parsing ambiguities and duplicate candidates
+
+Astronomy tests use known expected Apex sunrise/sunset fixtures with a documented
+tolerance, while business-boundary tests inject exact sunrise/sunset values so
+library updates cannot obscure a 15-minute-rule regression.
+
+### SQLite integration and recovery tests
+
+Run against real temporary SQLite files with production pragmas. Cover:
+
+- schema creation and every migration path from each supported schema version
+- failed migration rollback and refusal to start on newer or damaged schemas
+- WAL recovery after killing a subprocess during manual entry, deletion, live
+  start, live end, cancel, CSV import, archive creation, and migration
+- live finalization before-commit and after-commit failure points, proving retry
+  creates exactly one completed drive
+- duplicate manual and live requests with same and conflicting idempotency data
+- edit retries after response loss and conflicting edits from two browser
+  sessions
+- interrupted CSV import rollback and safe retry
+- `quick_check` startup failure and read-only/unready behavior
+- archive hash/integrity rejection
+- archive retention behavior
+- full restore equality for every authoritative table, including soft-deleted
+  rows, configuration, raw imports, audits, and an active live drive
+- quarantine preservation and rollback when post-restore readiness fails
+
+Tests must use subprocess termination and reopen the database rather than merely
+raising an exception inside one connection.
+
+### Browser tests
+
+Playwright WebKit runs at representative iPhone viewport sizes and verifies:
+
+- dashboard gauge and night total without horizontal scrolling
+- minimum touch-target sizing and readable entry controls
+- manual entry validation and warning acknowledgement
+- drive listing, details, editing, concurrent-edit conflict, deletion, CSV
+  download/upload, and archive controls
+- start, elapsed display, end, cancel, double-tap, and refresh behavior
+- end-request retry after a response is lost
+- active-drive recovery in a fresh browser context with no cookies or local
+  storage
+- active-drive recovery after restarting the service between page loads
+- offline/Tailscale-unavailable presentation without losing browser form state
+- end-time correction after reconnection delay
+
+Before a release is installed as the persistent service, perform an actual
+iPhone Chrome smoke test through Tailscale: start a drive, close/reap the
+browser, disconnect Tailscale, reconnect from a changed network, open a new
+session, verify the active timer, then end and confirm exactly one saved drive.
+
+### Release gates
+
+Required before deployment:
+
+- unit, SQLite integration/recovery, and Playwright suites pass
+- `git diff --check` passes
+- a fresh bootstrap works from the committed hash-locked dependencies
+- seed import totals and warnings are manually reconciled
+- `doctor` reports healthy local service, database, archive, and Tailscale layers
+- a full archive is created, verified, restored into a disposable state
+  directory, and compared with the source database
+- start/stop/restart and reboot persistence are smoke-tested
 
 ## Open Issues Identified From Current Seed Data
 
@@ -616,19 +993,24 @@ These should be handled explicitly during implementation:
 ### Phase 1
 
 - database schema
+- durability pragmas, migrations, integrity checks, and idempotency
 - seed import
 - dashboard
 - manual entry
-- drive list and delete
+- drive list, edit, and delete
 - CSV export/import
+- full-state archive create/verify/restore and automated retention
 - day/night computation
 - warnings engine
+- unit and SQLite recovery tests
 
 ### Phase 2
 
 - live-drive start/end/cancel
 - user-level `systemd` service helpers
 - Tailscale-forwarded deployment docs
+- operational health, doctor, and structured logging
+- Playwright mobile-WebKit and actual-iPhone reconnect tests
 
 ### Phase 3
 
@@ -640,6 +1022,8 @@ These should be handled explicitly during implementation:
 
 - Sunrise/sunset location: Apex, North Carolina.
 - Timezone: `America/New_York`.
+- Calendar week: Sunday through Saturday in local time; configurable if DMV
+  provides a different interpretation.
 - Supervisor DL number and state: not yet available; keep nullable until
   supplied and warn before DMV-facing export.
 - Dashboard: show all recorded time as progress toward 60 hours. Flag any week
