@@ -21,21 +21,10 @@
       </form>
     </div>
   {% else %}
-    <section class="warning-card"><h2>Drive ended</h2><p>The end time is safely stored. Finish the details below.</p></section>
-    <section class="detail-card">
-      <div><span>Provisional duration</span><strong>{{ format_minutes(preview.duration_minutes) }}</strong></div>
-      <div><span>Calculated day / night</span><strong>{{ format_minutes(preview.day_minutes) }} / {{ format_minutes(preview.night_minutes) }}</strong></div>
-      {% for warning in preview.warnings %}<div><span>Warning</span><strong>{{ warning }}</strong></div>{% endfor %}
-    </section>
+    <p class="completion-note"><strong>Drive ended.</strong> Review the times and details, then save.</p>
     <form class="stacked-form" method="post" action="/live/{{ live.id }}/finalize" data-live-action="finalize" data-async-submit>
       <input type="hidden" name="request_id" value="{{ '50000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
-      <label>Corrected end time (optional)
-        <span class="optional-datetime" data-empty="yes">
-          <input type="datetime-local" name="corrected_end_local" aria-describedby="corrected-end-help">
-          <span class="datetime-prompt" aria-hidden="true">Tap to change the recorded end time</span>
-        </span>
-        <small class="field-note" id="corrected-end-help">Leave blank to use the stored end time above.</small>
-      </label>
+      {% include "_time_editor.html" %}
       <fieldset><legend>Road type</legend>
         {% for kind in ("local", "highway", "mixed", "unknown") %}
           <label class="choice"><input type="radio" name="road_type" value="{{ kind }}" {{ "checked" if kind == "unknown" }}> {{ kind | title }}</label>

@@ -98,14 +98,67 @@
   }
   scheduleTheme();
 
-  document.querySelectorAll(".optional-datetime").forEach(container => {
-    const input = container.querySelector('input[type="datetime-local"]');
-    const updateEmptyState = () => {
-      container.dataset.empty = input.value ? "no" : "yes";
+  function localInputMilliseconds(value) {
+    const match = value.match(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/
+    );
+    if (!match) return NaN;
+    return Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5])
+    );
+  }
+
+  function formatLocalInput(milliseconds) {
+    const value = new Date(milliseconds);
+    const pad = number => String(number).padStart(2, "0");
+    return (
+      `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}` +
+      `T${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}`
+    );
+  }
+
+  document.querySelectorAll("[data-time-editor]").forEach(editor => {
+    const startInput = editor.querySelector("[data-time-start]");
+    const endInput = editor.querySelector("[data-time-end]");
+    const hoursInput = editor.querySelector("[data-duration-hours]");
+    const minutesInput = editor.querySelector("[data-duration-minutes]");
+
+    const updateDuration = () => {
+      const start = localInputMilliseconds(startInput.value);
+      const end = localInputMilliseconds(endInput.value);
+      const totalMinutes = Math.round((end - start) / 60000);
+      const valid = Number.isFinite(totalMinutes) && totalMinutes > 0;
+      endInput.setCustomValidity(valid ? "" : "End time must be after start time.");
+      if (!valid) return;
+      hoursInput.value = String(Math.floor(totalMinutes / 60));
+      minutesInput.value = String(totalMinutes % 60);
+      hoursInput.setCustomValidity("");
+      minutesInput.setCustomValidity("");
     };
-    input.addEventListener("input", updateEmptyState);
-    input.addEventListener("change", updateEmptyState);
-    updateEmptyState();
+
+    const updateEnd = () => {
+      const start = localInputMilliseconds(startInput.value);
+      const hours = Number(hoursInput.value);
+      const minutes = Number(minutesInput.value);
+      const totalMinutes = hours * 60 + minutes;
+      const valid = Number.isFinite(start) && Number.isFinite(totalMinutes) && totalMinutes > 0;
+      const message = valid ? "" : "Duration must be at least one minute.";
+      hoursInput.setCustomValidity(message);
+      minutesInput.setCustomValidity(message);
+      if (!valid) return;
+      endInput.value = formatLocalInput(start + totalMinutes * 60000);
+      endInput.setCustomValidity("");
+    };
+
+    startInput.addEventListener("input", updateDuration);
+    endInput.addEventListener("input", updateDuration);
+    hoursInput.addEventListener("input", updateEnd);
+    minutesInput.addEventListener("input", updateEnd);
+    updateDuration();
   });
 
   document.querySelectorAll("form[data-async-submit]").forEach(form => {

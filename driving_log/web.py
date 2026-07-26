@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -20,12 +19,7 @@ from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
 from driving_log.live import LiveDriveService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
-from driving_log.solar import (
-    apex_daylight_window,
-    resolve_local,
-    split_day_night,
-    week_segments,
-)
+from driving_log.solar import apex_daylight_window, resolve_local
 
 PACKAGE_DIR = Path(__file__).parent
 ZONE = ZoneInfo("America/New_York")
@@ -59,6 +53,17 @@ def _format_local_datetime(value: str | datetime) -> str:
     )
 
 
+def _local_input_value(value: str | datetime) -> str:
+    return _local_datetime(value).strftime("%Y-%m-%dT%H:%M")
+
+
+def _duration_parts(minutes: int) -> dict[str, int]:
+    return {
+        "duration_hours": minutes // 60,
+        "duration_remainder": minutes % 60,
+    }
+
+
 def _theme_context(now: datetime | None = None) -> dict[str, object]:
     selected = (now or datetime.now(UTC)).astimezone(UTC)
     local = selected.astimezone(ZONE)
@@ -75,55 +80,6 @@ def _theme_context(now: datetime | None = None) -> dict[str, object]:
         "theme": theme,
         "theme_boundaries": sorted(boundaries),
         "server_now_utc": selected.isoformat().replace("+00:00", "Z"),
-    }
-
-
-def _live_preview(
-    database: Database,
-    records: RecordService,
-    row: sqlite3.Row,
-    end: datetime | None = None,
-) -> dict[str, object]:
-    live_row = dict(row)
-    start = datetime.fromisoformat(str(live_row["started_at_utc"]).replace("Z", "+00:00"))
-    selected_end = end or datetime.fromisoformat(
-        str(live_row["provisional_ended_at_utc"]).replace("Z", "+00:00")
-    )
-    duration = round((selected_end - start).total_seconds() / 60)
-    day, night = split_day_night(start, selected_end)
-    warnings: list[str] = []
-    if duration > 300:
-        warnings.append("Drive exceeds five hours.")
-    if start.astimezone(ZONE).date() != selected_end.astimezone(ZONE).date():
-        warnings.append("Drive crosses local midnight.")
-    connection = database.connect()
-    overlap_count = connection.execute(
-        "SELECT COUNT(*) FROM drives WHERE deleted_at IS NULL "
-        "AND started_at_utc < ? AND ended_at_utc > ?",
-        (
-            selected_end.astimezone(UTC).isoformat().replace("+00:00", "Z"),
-            start.astimezone(UTC).isoformat().replace("+00:00", "Z"),
-        ),
-    ).fetchone()[0]
-    connection.close()
-    if overlap_count:
-        warnings.append(f"Drive overlaps {overlap_count} saved drive(s).")
-    totals = records.totals()
-    existing_weeks = cast(list[dict[str, object]], totals["weeks"])
-    by_start: dict[str, int] = {}
-    for week in existing_weeks:
-        minutes = week["minutes"]
-        assert isinstance(minutes, int)
-        by_start[str(week["week_start_utc"])] = minutes
-    for week_start, _week_end, minutes in week_segments(start, selected_end):
-        if by_start.get(week_start.isoformat(), 0) + minutes > 600:
-            warnings.append("Drive would put a calendar week over the 10-hour advisory.")
-            break
-    return {
-        "duration_minutes": duration,
-        "day_minutes": day,
-        "night_minutes": night,
-        "warnings": warnings,
     }
 
 
@@ -224,9 +180,10 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 request,
                 title="Add drive",
                 drive=None,
-                start_local=now.isoformat(timespec="minutes"),
-                end_local=(now + timedelta(minutes=30)).isoformat(timespec="minutes"),
+                start_local=_local_input_value(now),
+                end_local=_local_input_value(now + timedelta(minutes=30)),
                 action="/drives",
+                **_duration_parts(30),
             ),
         )
 
@@ -270,8 +227,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.get("/drives/{drive_id}/edit", response_class=HTMLResponse)
     async def drive_edit(request: Request, drive_id: str) -> HTMLResponse:
         drive = records.get(drive_id)
-        start = datetime.fromisoformat(drive["started_at_utc"].replace("Z", "+00:00"))
-        end = datetime.fromisoformat(drive["ended_at_utc"].replace("Z", "+00:00"))
         return templates.TemplateResponse(
             request,
             "drive_form.html",
@@ -279,9 +234,10 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 request,
                 title="Edit drive",
                 drive=drive,
-                start_local=start.astimezone(ZONE).isoformat(timespec="minutes"),
-                end_local=end.astimezone(ZONE).isoformat(timespec="minutes"),
+                start_local=_local_input_value(drive["started_at_utc"]),
+                end_local=_local_input_value(drive["ended_at_utc"]),
                 action=f"/drives/{drive_id}/edit",
+                **_duration_parts(int(drive["duration_minutes"])),
             ),
         )
 
@@ -289,15 +245,25 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     async def drive_update(request: Request, drive_id: str) -> RedirectResponse:
         form = await read_form(request)
         current = records.get(drive_id)
+        start_text = str(form["started_at_local"])
+        end_text = str(form["ended_at_local"])
+        start_utc = (
+            datetime.fromisoformat(str(current["started_at_utc"]).replace("Z", "+00:00"))
+            if start_text == _local_input_value(current["started_at_utc"])
+            else _parse_local(start_text, str(form.get("start_fold", "")))
+        )
+        end_utc = (
+            datetime.fromisoformat(str(current["ended_at_utc"]).replace("Z", "+00:00"))
+            if end_text == _local_input_value(current["ended_at_utc"])
+            else _parse_local(end_text, str(form.get("end_fold", "")))
+        )
         value = DriveInput(
             driver_name=str(form.get("driver_name", current["driver_name"])),
             supervisor_name=str(form.get("supervisor_name", "")) or None,
             supervisor_dl_number=current["supervisor_dl_number"],
             supervisor_dl_state=current["supervisor_dl_state"],
-            started_at_utc=_parse_local(
-                str(form["started_at_local"]), str(form.get("start_fold", ""))
-            ),
-            ended_at_utc=_parse_local(str(form["ended_at_local"]), str(form.get("end_fold", ""))),
+            started_at_utc=start_utc,
+            ended_at_utc=end_utc,
             timezone_name=current["timezone_name"],
             road_type=str(form.get("road_type", "unknown")),
             weather=str(form.get("weather", "")),
@@ -327,15 +293,24 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.get("/live", response_class=HTMLResponse)
     async def live_page(request: Request) -> HTMLResponse:
         open_drive = live.current()
-        preview = (
-            _live_preview(database, records, open_drive)
-            if open_drive and open_drive["status"] == "ending"
-            else None
-        )
+        time_values: dict[str, object] = {}
+        if open_drive and open_drive["status"] == "ending":
+            started = datetime.fromisoformat(
+                str(open_drive["started_at_utc"]).replace("Z", "+00:00")
+            )
+            ended = datetime.fromisoformat(
+                str(open_drive["provisional_ended_at_utc"]).replace("Z", "+00:00")
+            )
+            minutes = round((ended - started).total_seconds() / 60)
+            time_values = {
+                "start_local": _local_input_value(started),
+                "end_local": _local_input_value(ended),
+                **_duration_parts(minutes),
+            }
         return templates.TemplateResponse(
             request,
             "live.html",
-            common(request, title="Live drive", live=open_drive, preview=preview),
+            common(request, title="Live drive", live=open_drive, **time_values),
         )
 
     @app.get("/live/state")
@@ -383,11 +358,21 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/live/{live_id}/finalize")
     async def live_finalize(request: Request, live_id: str) -> RedirectResponse:
         form = await read_form(request)
-        corrected_text = str(form.get("corrected_end_local", "")).strip()
         current = live.current()
         if not current or current["id"] != live_id:
             raise ConflictError("live drive is no longer awaiting finalization")
-        corrected_end = _parse_local(corrected_text) if corrected_text else None
+        start_text = str(form["started_at_local"])
+        end_text = str(form["ended_at_local"])
+        corrected_start = (
+            None
+            if start_text == _local_input_value(current["started_at_utc"])
+            else _parse_local(start_text, str(form.get("start_fold", "")))
+        )
+        corrected_end = (
+            None
+            if end_text == _local_input_value(current["provisional_ended_at_utc"])
+            else _parse_local(end_text, str(form.get("end_fold", "")))
+        )
         drive = live.finalize(
             live_id,
             request_id=str(form["request_id"]),
@@ -395,6 +380,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             weather=str(form.get("weather", "")),
             notes=str(form.get("notes", "")),
             supervisor_name=str(form.get("supervisor_name", "")) or None,
+            corrected_start_utc=corrected_start,
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),
         )

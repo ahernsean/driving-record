@@ -230,6 +230,7 @@ class LiveDriveService:
         supervisor_name: str | None = None,
         supervisor_dl_number: str | None = None,
         supervisor_dl_state: str | None = None,
+        corrected_start_utc: datetime | None = None,
         corrected_end_utc: datetime | None = None,
         actor_identity: str | None = None,
     ) -> sqlite3.Row:
@@ -240,6 +241,9 @@ class LiveDriveService:
             "supervisor_name": supervisor_name,
             "supervisor_dl_number": supervisor_dl_number,
             "supervisor_dl_state": supervisor_dl_state,
+            "corrected_start_utc": (
+                corrected_start_utc.isoformat() if corrected_start_utc else None
+            ),
             "corrected_end_utc": corrected_end_utc.isoformat() if corrected_end_utc else None,
         }
         digest = payload_hash(payload)
@@ -256,7 +260,9 @@ class LiveDriveService:
                 )
             if row["status"] != "ending" or not row["provisional_ended_at_utc"]:
                 raise ConflictError("live drive must be ending before finalization")
-            start = datetime.fromisoformat(row["started_at_utc"].replace("Z", "+00:00"))
+            start = corrected_start_utc or datetime.fromisoformat(
+                row["started_at_utc"].replace("Z", "+00:00")
+            )
             end = corrected_end_utc or datetime.fromisoformat(
                 row["provisional_ended_at_utc"].replace("Z", "+00:00")
             )

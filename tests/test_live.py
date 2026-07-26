@@ -99,6 +99,25 @@ class LiveDriveTests(unittest.TestCase):
         self.assertEqual(recovered["status"], "ending")  # type: ignore[index]
         self.assertEqual(RecordService(self.database).list_drives(), [])
 
+    def test_finalize_can_correct_both_start_and_end(self) -> None:
+        live = self.service.start(request_id=str(uuid.uuid4()))
+        self.clock.value += timedelta(minutes=30)
+        self.service.end(live["id"], request_id=str(uuid.uuid4()))
+        corrected_start = datetime(2026, 7, 26, 11, 55, tzinfo=UTC)
+        corrected_end = datetime(2026, 7, 26, 12, 35, tzinfo=UTC)
+
+        drive = self.service.finalize(
+            live["id"],
+            request_id=str(uuid.uuid4()),
+            road_type="local",
+            corrected_start_utc=corrected_start,
+            corrected_end_utc=corrected_end,
+        )
+
+        self.assertEqual(drive["started_at_utc"], "2026-07-26T11:55:00Z")
+        self.assertEqual(drive["ended_at_utc"], "2026-07-26T12:35:00Z")
+        self.assertEqual(drive["duration_minutes"], 40)
+
 
 if __name__ == "__main__":
     unittest.main()

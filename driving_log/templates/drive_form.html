@@ -4,22 +4,7 @@
   <form class="stacked-form" method="post" action="{{ action }}" data-async-submit>
     <input type="hidden" name="request_id" value="{{ '10000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     {% if drive %}<input type="hidden" name="version" value="{{ drive.version }}">{% endif %}
-    <label>Start
-      <input required type="datetime-local" name="started_at_local" value="{{ start_local }}">
-    </label>
-    <label>DST occurrence (only when the start time repeats)
-      <select name="start_fold">
-        <option value="">Not repeated</option><option value="0">First occurrence</option><option value="1">Second occurrence</option>
-      </select>
-    </label>
-    <label>End
-      <input required type="datetime-local" name="ended_at_local" value="{{ end_local }}">
-    </label>
-    <label>DST occurrence (only when the end time repeats)
-      <select name="end_fold">
-        <option value="">Not repeated</option><option value="0">First occurrence</option><option value="1">Second occurrence</option>
-      </select>
-    </label>
+    {% include "_time_editor.html" %}
     <label>Driver
       <input required name="driver_name" value="{{ drive.driver_name if drive else 'Daniel Ahern' }}">
     </label>

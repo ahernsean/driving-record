@@ -80,6 +80,52 @@ class WebTests(unittest.TestCase):
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
+                self.assertIn("data-time-editor", manual_form.text)
+                self.assertIn('aria-label="Duration hours"', manual_form.text)
+                edit_form = await client.get(f"{response.headers['location']}/edit")
+                self.assertIn("data-time-editor", edit_form.text)
+                self.assertIn('value="2026-07-20T12:00"', edit_form.text)
+                self.assertIn('value="2026-07-20T12:30"', edit_form.text)
+                version_match = re.search(r'name="version" value="(\d+)"', edit_form.text)
+                self.assertIsNotNone(version_match)
+                updated = await client.post(
+                    f"{response.headers['location']}/edit",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "version": version_match.group(1),  # type: ignore[union-attr]
+                        "driver_name": "Daniel Ahern",
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:00",
+                        "ended_at_local": "2026-07-20T12:45",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(updated.status_code, 303)
+                updated_detail = await client.get(updated.headers["location"])
+                self.assertIn("45m", updated_detail.text)
+                updated_version = re.search(r'name="version" value="(\d+)"', updated_detail.text)
+                self.assertIsNotNone(updated_version)
+                deleted = await client.post(
+                    f"{response.headers['location']}/delete",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "version": updated_version.group(1),  # type: ignore[union-attr]
+                    },
+                )
+                self.assertEqual(deleted.status_code, 303)
+                self.assertEqual(deleted.headers["location"], "/drives")
+                archive = await client.post(
+                    "/archives",
+                    data={"request_id": str(uuid.uuid4())},
+                )
+                self.assertEqual(archive.status_code, 303)
+                archives = await client.get(archive.headers["location"])
+                self.assertIn("Verified archive", archives.text)
+                imports = await client.get("/imports")
+                self.assertIn("Imports and exports", imports.text)
+                csv_export = await client.get("/csv/export")
+                self.assertEqual(csv_export.status_code, 200)
+                self.assertIn("text/csv", csv_export.headers["content-type"])
 
         self.run_async(scenario)
 
@@ -110,6 +156,9 @@ class WebTests(unittest.TestCase):
                         },
                     )
                     self.assertEqual(start.status_code, 303)
+                    live_state = await first.get("/live/state")
+                    self.assertEqual(live_state.status_code, 200)
+                    self.assertIsNotNone(live_state.json()["live"])
                 async with httpx.AsyncClient(
                     transport=transport,
                     base_url="http://testserver",
@@ -134,12 +183,15 @@ class WebTests(unittest.TestCase):
                     follow_redirects=False,
                 ) as newest:
                     completion = await newest.get("/live")
-                    self.assertIn("The end time is safely stored", completion.text)
+                    self.assertIn("<strong>Drive ended.</strong>", completion.text)
                     self.assertNotIn('name="acknowledge_warnings"', completion.text)
                     self.assertNotIn('name="supervisor_dl_number"', completion.text)
                     self.assertNotIn('name="supervisor_dl_state"', completion.text)
-                    self.assertIn("Tap to change the recorded end time", completion.text)
-                    self.assertIn("Leave blank to use the stored end time above", completion.text)
+                    self.assertIn("data-time-editor", completion.text)
+                    start_match = re.search(
+                        r'name="started_at_local" value="([^"]+)"', completion.text
+                    )
+                    self.assertIsNotNone(start_match)
                     # The HTTP scenario is intentionally short, so correct the end into
                     # the future enough to produce a valid minute-based record.
                     finalized = await newest.post(
@@ -148,7 +200,8 @@ class WebTests(unittest.TestCase):
                         data={
                             "request_id": str(uuid.uuid4()),
                             "road_type": "local",
-                            "corrected_end_local": "2026-07-27T12:00",
+                            "started_at_local": start_match.group(1),  # type: ignore[union-attr]
+                            "ended_at_local": "2026-07-27T12:00",
                         },
                     )
                     self.assertEqual(finalized.status_code, 303)
