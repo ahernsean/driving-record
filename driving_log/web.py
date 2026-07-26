@@ -225,6 +225,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 road_type=str(form.get("road_type", "unknown")),
                 weather=str(form.get("weather", "")),
                 notes=str(form.get("notes", "")),
+                end_location=str(form.get("end_location", "")),
             ),
             request_id=str(form["request_id"]),
         )
@@ -288,6 +289,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             road_type=str(form.get("road_type", "unknown")),
             weather=str(form.get("weather", "")),
             notes=str(form.get("notes", "")),
+            end_location=str(form.get("end_location", "")),
             source=current["source"],
             source_reference=current["source_reference"],
             import_batch_id=current["import_batch_id"],
@@ -399,6 +401,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             road_type=str(form.get("road_type", "unknown")),
             weather=str(form.get("weather", "")),
             notes=str(form.get("notes", "")),
+            end_location=str(form.get("end_location", "")),
             supervisor_name=str(form.get("supervisor_name", "")) or None,
             corrected_start_utc=corrected_start,
             corrected_end_utc=corrected_end,

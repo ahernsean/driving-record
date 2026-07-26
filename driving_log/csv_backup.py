@@ -13,8 +13,8 @@ from typing import cast
 from driving_log.db import Database, utc_now_text
 from driving_log.records import ConflictError, DriveInput, RecordService
 
-FORMAT_VERSION = "1"
-CSV_COLUMNS = (
+FORMAT_VERSION = "2"
+LEGACY_CSV_COLUMNS = (
     "format_version",
     "id",
     "driver_name",
@@ -39,14 +39,20 @@ CSV_COLUMNS = (
     "source",
     "source_reference",
 )
+CSV_COLUMNS = (
+    *LEGACY_CSV_COLUMNS[:-2],
+    "end_location",
+    *LEGACY_CSV_COLUMNS[-2:],
+)
 
 
-def _export_row(row: sqlite3.Row) -> dict[str, str]:
+def _export_row(row: sqlite3.Row, format_version: str = FORMAT_VERSION) -> dict[str, str]:
+    columns = LEGACY_CSV_COLUMNS if format_version == "1" else CSV_COLUMNS
     return {
-        column: FORMAT_VERSION
+        column: format_version
         if column == "format_version"
         else str(row[column] if row[column] is not None else "")
-        for column in CSV_COLUMNS
+        for column in columns
     }
 
 
@@ -75,15 +81,17 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
     except UnicodeDecodeError as exc:
         raise ValueError("CSV must be UTF-8") from exc
     reader = csv.DictReader(io.StringIO(text))
-    if tuple(reader.fieldnames or ()) != CSV_COLUMNS:
-        raise ValueError("CSV headers do not match format version 1")
+    fieldnames = tuple(reader.fieldnames or ())
+    if fieldnames not in (LEGACY_CSV_COLUMNS, CSV_COLUMNS):
+        raise ValueError("CSV headers do not match a supported format version")
+    expected_version = "1" if fieldnames == LEGACY_CSV_COLUMNS else FORMAT_VERSION
     raw_rows = list(reader)
     ids = [row["id"] for row in raw_rows]
     if len(ids) != len(set(ids)):
         raise ValueError("CSV contains duplicate drive IDs")
     candidates: list[tuple[dict[str, str], DriveInput]] = []
     for number, row in enumerate(raw_rows, 2):
-        if row["format_version"] != FORMAT_VERSION:
+        if row["format_version"] != expected_version:
             raise ValueError(f"row {number}: unsupported format version")
         try:
             value = DriveInput(
@@ -97,6 +105,7 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
                 road_type=row["road_type"],
                 weather=row["weather"],
                 notes=row["notes"],
+                end_location=row.get("end_location", ""),
                 source=row["source"],
                 source_reference=row["source_reference"] or None,
             )
@@ -134,7 +143,7 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
                 "SELECT * FROM drives WHERE id=?", (raw["id"],)
             ).fetchone()
             if current:
-                exported = _export_row(current)
+                exported = _export_row(current, expected_version)
                 if exported != raw:
                     raise ConflictError(f"drive {raw['id']} already exists with different content")
                 result_id = current["id"]
@@ -143,7 +152,7 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
             else:
                 imported_value = DriveInput(**{**value.__dict__, "import_batch_id": batch_id})
                 result = service.create(imported_value, drive_id=raw["id"], connection=transaction)
-                if _export_row(result) != raw:
+                if _export_row(result, expected_version) != raw:
                     raise ValueError(
                         f"drive {raw['id']} contains inconsistent derived or context fields"
                     )

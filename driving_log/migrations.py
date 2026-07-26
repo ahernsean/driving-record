@@ -138,5 +138,12 @@ CREATE INDEX warnings_drive_idx ON drive_warnings(drive_id);
 CREATE INDEX import_rows_batch_idx ON import_rows(import_batch_id);
 """
 
-MIGRATIONS = (Migration(1, "initial_schema", SCHEMA_V1),)
+SCHEMA_V2 = """
+ALTER TABLE drives ADD COLUMN end_location TEXT NOT NULL DEFAULT '';
+"""
+
+MIGRATIONS = (
+    Migration(1, "initial_schema", SCHEMA_V1),
+    Migration(2, "drive_end_location", SCHEMA_V2),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

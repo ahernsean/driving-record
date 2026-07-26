@@ -65,6 +65,7 @@ class WebTests(unittest.TestCase):
                         "started_at_local": "2026-07-20T12:00",
                         "ended_at_local": "2026-07-20T12:30",
                         "road_type": "local",
+                        "end_location": "Apex Friendship High School",
                     },
                 )
                 self.assertEqual(response.status_code, 303)
@@ -84,10 +85,12 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", detail.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:30 PM EDT", detail.text)
                 self.assertNotIn("Started (UTC)", detail.text)
+                self.assertIn("Apex Friendship High School", detail.text)
                 listing = await client.get("/drives")
                 self.assertIn("Drive history", listing.text)
                 self.assertIn("local", listing.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", listing.text)
+                self.assertIn("Apex Friendship High School", listing.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
@@ -109,11 +112,13 @@ class WebTests(unittest.TestCase):
                         "started_at_local": "2026-07-20T12:00",
                         "ended_at_local": "2026-07-20T12:45",
                         "road_type": "local",
+                        "end_location": "Home",
                     },
                 )
                 self.assertEqual(updated.status_code, 303)
                 updated_detail = await client.get(updated.headers["location"])
                 self.assertIn("45m", updated_detail.text)
+                self.assertIn("Home", updated_detail.text)
                 updated_version = re.search(r'name="version" value="(\d+)"', updated_detail.text)
                 self.assertIsNotNone(updated_version)
                 deleted = await client.post(
@@ -203,6 +208,7 @@ class WebTests(unittest.TestCase):
                     self.assertNotIn('name="supervisor_dl_number"', completion.text)
                     self.assertNotIn('name="supervisor_dl_state"', completion.text)
                     self.assertIn("data-time-editor", completion.text)
+                    self.assertIn('name="end_location"', completion.text)
                     start_match = re.search(
                         r'name="started_at_local" value="([^"]+)"', completion.text
                     )
@@ -214,6 +220,7 @@ class WebTests(unittest.TestCase):
                         "road_type": "local",
                         "started_at_local": start_match.group(1),  # type: ignore[union-attr]
                         "ended_at_local": "2026-07-27T12:00",
+                        "end_location": "Home",
                     }
                     finalized = await newest.post(
                         f"/live/{selected_id}/finalize",
@@ -228,6 +235,8 @@ class WebTests(unittest.TestCase):
                     )
                     self.assertEqual(replay.status_code, 303)
                     self.assertEqual(replay.headers["location"], finalized.headers["location"])
+                    detail = await newest.get(finalized.headers["location"])
+                    self.assertIn("Home", detail.text)
                     dashboard = await newest.get("/")
                     self.assertIn("Recorded drives", dashboard.text)
 
