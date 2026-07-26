@@ -99,21 +99,44 @@
   scheduleTheme();
 
   document.querySelectorAll("form[data-form-action]").forEach(form => {
-    form.addEventListener("submit", event => {
-      if (form.dataset.tokenRefreshed === "yes") return;
+    form.addEventListener("submit", async event => {
+      if (event.defaultPrevented || form.dataset.submitting === "yes") return;
       event.preventDefault();
+      form.dataset.submitting = "yes";
+      const submitter = event.submitter;
+      if (submitter) submitter.disabled = true;
       const action = form.dataset.formAction;
-      fetch(`/form-token/${encodeURIComponent(action)}`, {cache: "no-store"})
-        .then(response => response.ok ? response.json() : Promise.reject())
-        .then(result => {
+      try {
+        const tokenResponse = await fetch(
+          `/form-token/${encodeURIComponent(action)}`,
+          {cache: "no-store"}
+        );
+        if (tokenResponse.ok) {
+          const result = await tokenResponse.json();
           form.elements.form_token.value = result.token;
-          form.dataset.tokenRefreshed = "yes";
-          form.requestSubmit();
-        })
-        .catch(() => {
-          form.dataset.tokenRefreshed = "yes";
-          form.requestSubmit();
+        }
+        const response = await fetch(form.action, {
+          method: form.method || "POST",
+          body: new FormData(form),
+          cache: "no-store",
         });
+        if (response.redirected) {
+          window.location.assign(response.url);
+          return;
+        }
+        if (!response.ok) {
+          const type = response.headers.get("content-type") || "";
+          const message = type.includes("application/json")
+            ? (await response.json()).detail
+            : (await response.text()).replace(/<[^>]+>/g, " ").trim();
+          throw new Error(message || `Request failed (${response.status})`);
+        }
+        window.location.reload();
+      } catch (error) {
+        alert(error.message || "The request could not be completed.");
+        form.dataset.submitting = "no";
+        if (submitter) submitter.disabled = false;
+      }
     });
   });
 })();
