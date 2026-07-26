@@ -18,6 +18,7 @@ from driving_log.migrations import LATEST_SCHEMA_VERSION
 from driving_log.operations import (
     apply_retention,
     install_user_units,
+    process_restore_request,
     replicate_archive,
     run_systemctl,
     service_snapshot,
@@ -65,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     archive_restore = archive_sub.add_parser("restore")
     archive_restore.add_argument("archive", type=Path)
     archive_restore.add_argument("--confirm", action="store_true")
+    archive_request = archive_sub.add_parser("restore-request")
+    archive_request.add_argument("operation_id")
     imports = sub.add_parser("imports")
     imports.add_argument("action", choices=("status",))
     return parser
@@ -84,8 +87,8 @@ def doctor(settings: Settings) -> dict[str, object]:
     }
     database = Database(settings.database_path, settings.archive_dir)
     try:
-        database.initialize()
-        connection = database.connect()
+        database.check_existing()
+        connection = database.connect_readonly()
         open_live = connection.execute(
             "SELECT id, status, started_at_utc, provisional_ended_at_utc "
             "FROM live_drives WHERE status IN ('active','ending')"
@@ -111,11 +114,68 @@ def doctor(settings: Settings) -> dict[str, object]:
         connection.close()
     except Exception as exc:
         result.update({"ready": False, "error": str(exc)})
-    archives = sorted(settings.archive_dir.glob("*.tar.gz"), reverse=True)
+    archives = sorted(
+        settings.archive_dir.glob("*.tar.gz"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
     result["newest_archive"] = str(archives[0]) if archives else None
-    result["services"] = service_snapshot()
-    result["tailscale"] = tailscale_snapshot()
+    if archives:
+        try:
+            result["newest_archive_verification"] = verify_archive(archives[0])
+        except Exception as exc:
+            result["newest_archive_verification"] = {
+                "verified": False,
+                "error": str(exc),
+            }
+    else:
+        result["newest_archive_verification"] = {"verified": False}
+    services = service_snapshot()
+    tailscale = tailscale_snapshot()
+    result["services"] = services
+    result["tailscale"] = tailscale
     result["external_archive_dir"] = os.environ.get("DRIVING_LOG_EXTERNAL_ARCHIVE_DIR")
+    result["warnings"] = []
+    if not result["external_archive_dir"]:
+        cast_warnings = result["warnings"]
+        assert isinstance(cast_warnings, list)
+        cast_warnings.append("external archives are not configured")
+    production = not settings.public_host.startswith(("127.0.0.1", "localhost", "testserver"))
+    if production:
+        web_status = services.get("driving-log-web.service", {})
+        service_ok = isinstance(web_status, dict) and web_status.get("ActiveState") == "active"
+        configuration = tailscale.get("configuration", {})
+        tcp = configuration.get("TCP", {}) if isinstance(configuration, dict) else {}
+        web = configuration.get("Web", {}) if isinstance(configuration, dict) else {}
+        https_ok = (
+            isinstance(tcp, dict)
+            and isinstance(tcp.get("8443"), dict)
+            and bool(tcp["8443"].get("HTTPS"))
+        )
+        driving_handler = web.get(settings.public_host, {}) if isinstance(web, dict) else {}
+        wordle_handler = (
+            web.get(settings.public_host.rsplit(":", 1)[0] + ":80", {})
+            if isinstance(web, dict)
+            else {}
+        )
+        driving_ok = "8766" in json.dumps(driving_handler)
+        wordle_ok = "8765" in json.dumps(wordle_handler)
+        archive_status = result["newest_archive_verification"]
+        archive_ok = isinstance(archive_status, dict) and bool(archive_status.get("verified"))
+        result["deployment_checks"] = {
+            "web_service_active": service_ok,
+            "archive_verified": archive_ok,
+            "tailscale_https_8443": https_ok and driving_ok,
+            "wordle_http_80_preserved": wordle_ok,
+        }
+        result["ready"] = bool(
+            result.get("ready")
+            and service_ok
+            and archive_ok
+            and https_ok
+            and driving_ok
+            and wordle_ok
+        )
     return result
 
 
@@ -178,6 +238,19 @@ def main(argv: list[str] | None = None) -> int:
         check_result = doctor(settings)
         print(check_result.get("quick_check", check_result.get("error", "unknown")))
         return 0 if check_result.get("ready") else 1
+    if args.command == "archive" and args.archive_action == "restore":
+        quarantine = restore_archive(settings.database_path, args.archive, confirm=args.confirm)
+        print(f"restored; previous database retained at {quarantine}")
+        return 0
+    if args.command == "archive" and args.archive_action == "restore-request":
+        result_path = process_restore_request(
+            args.operation_id,
+            settings.restore_dir,
+            settings.database_path,
+            settings.form_secret,
+        )
+        print(result_path)
+        return 0
     settings.ensure_directories()
     database = Database(settings.database_path)
     database.initialize()
@@ -205,19 +278,24 @@ def main(argv: list[str] | None = None) -> int:
             if removed:
                 print(f"retention removed {len(removed)} expired archives")
         elif args.archive_action == "list":
-            for path in sorted(settings.archive_dir.glob("*.tar.gz"), reverse=True):
+            for path in sorted(
+                settings.archive_dir.glob("*.tar.gz"),
+                key=lambda candidate: candidate.stat().st_mtime,
+                reverse=True,
+            ):
                 print(path)
         elif args.archive_action == "verify":
             selected = args.archive
             if selected is None:
-                candidates = sorted(settings.archive_dir.glob("*.tar.gz"), reverse=True)
+                candidates = sorted(
+                    settings.archive_dir.glob("*.tar.gz"),
+                    key=lambda candidate: candidate.stat().st_mtime,
+                    reverse=True,
+                )
                 if not candidates:
                     raise SystemExit("no archives found")
                 selected = candidates[0]
             print(json.dumps(verify_archive(selected), indent=2, sort_keys=True))
-        elif args.archive_action == "restore":
-            quarantine = restore_archive(settings.database_path, args.archive, confirm=args.confirm)
-            print(f"restored; previous database retained at {quarantine}")
         else:
             destination_text = os.environ.get("DRIVING_LOG_EXTERNAL_ARCHIVE_DIR")
             if not destination_text:
@@ -226,7 +304,11 @@ def main(argv: list[str] | None = None) -> int:
                     "archives remain on the Rocky disk"
                 )
                 return 0
-            candidates = sorted(settings.archive_dir.glob("*.tar.gz"), reverse=True)
+            candidates = sorted(
+                settings.archive_dir.glob("*.tar.gz"),
+                key=lambda candidate: candidate.stat().st_mtime,
+                reverse=True,
+            )
             if not candidates:
                 raise SystemExit("no local archive to replicate")
             print(replicate_archive(candidates[0], Path(destination_text)))

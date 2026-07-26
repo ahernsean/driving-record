@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import secrets
 import shutil
 import subprocess
+import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from driving_log.archive import verify_archive
+from driving_log.archive import restore_archive, verify_archive
 
 UNIT_NAMES = (
     "driving-log-web.service",
@@ -56,10 +60,13 @@ def install_user_units(
         "DRIVING_LOG_PUBLIC_HOST": public_host,
         "DRIVING_LOG_FORM_SECRET": secret,
     }
-    if external_archive_dir:
-        environment["DRIVING_LOG_EXTERNAL_ARCHIVE_DIR"] = str(
-            external_archive_dir.expanduser().resolve()
-        )
+    selected_external = (
+        str(external_archive_dir.expanduser().resolve())
+        if external_archive_dir
+        else existing.get("DRIVING_LOG_EXTERNAL_ARCHIVE_DIR")
+    )
+    if selected_external:
+        environment["DRIVING_LOG_EXTERNAL_ARCHIVE_DIR"] = str(selected_external)
     temporary = environment_path.with_suffix(".tmp")
     temporary.write_text(
         "".join(f"{key}={value}\n" for key, value in sorted(environment.items())),
@@ -134,10 +141,15 @@ def apply_retention(archive_dir: Path) -> list[Path]:
     keep = set(archives[:14])
     weekly: set[tuple[int, int]] = set()
     for archive in archives:
-        try:
-            stamp = archive.name.removeprefix("driving-log-").removesuffix(".tar.gz")
-            created = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-        except ValueError:
+        stamp = archive.name.removeprefix("driving-log-").removesuffix(".tar.gz")
+        created = None
+        for time_format in ("%Y%m%dT%H%M%S%fZ", "%Y%m%dT%H%M%SZ"):
+            try:
+                created = datetime.strptime(stamp, time_format).replace(tzinfo=UTC)
+                break
+            except ValueError:
+                continue
+        if created is None:
             keep.add(archive)
             continue
         week = created.isocalendar()[:2]
@@ -150,3 +162,37 @@ def apply_retention(archive_dir: Path) -> list[Path]:
             archive.unlink()
             removed.append(archive)
     return removed
+
+
+def process_restore_request(
+    operation_id: str, restore_dir: Path, database_path: Path, secret: str
+) -> Path:
+    uuid.UUID(operation_id)
+    operation_dir = restore_dir / operation_id
+    request_path = operation_dir / "request.json"
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    signature = str(payload.pop("signature", ""))
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    expected = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        raise ValueError("restore request signature is invalid")
+    if float(payload["not_before"]) > time.time():
+        raise ValueError("restore request is not active yet")
+    archive = Path(str(payload["archive_path"])).resolve()
+    if archive.parent != operation_dir.resolve():
+        raise ValueError("restore archive must be inside its operation directory")
+    verified = verify_archive(archive)
+    if verified["archive_sha256"] != payload["archive_sha256"]:
+        raise ValueError("restore request archive hash mismatch")
+    quarantine = restore_archive(database_path, archive, confirm=True)
+    result = {
+        "operation_id": operation_id,
+        "status": "completed",
+        "quarantine": str(quarantine),
+        "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    }
+    result_path = operation_dir / "result.json"
+    temporary = operation_dir / ".result.json.tmp"
+    temporary.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, result_path)
+    return result_path

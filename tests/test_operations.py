@@ -76,15 +76,20 @@ class OperationTests(unittest.TestCase):
                     public_host="driving.example.ts.net:8443",
                     external_archive_dir=home / "external",
                 )
+                install_user_units(
+                    repo,
+                    public_host="driving.example.ts.net:8443",
+                )
             environment = Path(result["environment"])
             self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
             contents = environment.read_text()
             self.assertIn("DRIVING_LOG_HOST=127.0.0.1", contents)
             self.assertIn("DRIVING_LOG_PORT=8766", contents)
             self.assertIn("DRIVING_LOG_FORM_SECRET=", contents)
+            self.assertIn(f"DRIVING_LOG_EXTERNAL_ARCHIVE_DIR={home / 'external'}", contents)
             unit_dir = Path(result["unit_directory"])
             self.assertEqual(len(list(unit_dir.iterdir())), 4)
-            systemctl.assert_called_once_with("daemon-reload")
+            self.assertEqual(systemctl.call_count, 2)
 
     def test_operational_snapshots_report_success_and_failure(self) -> None:
         completed = CompletedProcess(

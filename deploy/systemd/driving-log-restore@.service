@@ -7,4 +7,5 @@ Type=oneshot
 WorkingDirectory=%h/work/driving-record
 EnvironmentFile=-%h/.config/driving-log/environment
 ExecStart=%h/work/driving-record/driving-log archive restore-request %i
+ExecStopPost=systemctl --user start driving-log-web.service
 UMask=0077
