@@ -472,6 +472,27 @@ be reviewed manually.
 The main usage mode is phone-first while seated in the passenger seat. The UI
 should favor large targets, high contrast, and minimal typing.
 
+### Solar theme and system UI
+
+Use the same Apex solar rule as driving classification for the interface theme:
+
+- light theme from 15 minutes before sunrise through 15 minutes after sunset
+- dark theme at all other times
+
+Every server-rendered page includes the theme effective at the response's server
+UTC time and the next 48 hours of precomputed theme-boundary UTC instants. Set a
+root `data-theme` value, CSS `color-scheme`, and the browser `theme-color` so
+native form controls and surrounding browser UI match the active light or dark
+palette. Use system conventions for safe areas, text sizing, focus indication,
+reduced motion, and touch controls while keeping the solar theme authoritative
+over `prefers-color-scheme`.
+
+JavaScript schedules each supplied boundary and flips the root theme locally.
+If iOS suspends the page and delays a timer, the visibility handler immediately
+applies every elapsed boundary before rendering and then refreshes the schedule.
+Static pages are correct when loaded; the live-drive interface is required to
+remain open and flip at a boundary without a page reload.
+
 ### 1. Dashboard
 
 Primary landing page.
@@ -595,7 +616,8 @@ At start:
 
 During active drive:
 
-- dashboard shows elapsed time and `End drive` / `Cancel drive`
+- dashboard prominently shows the fixed local start time, timezone
+  abbreviation, live duration as `H:MM:SS`, and `End drive` / `Cancel drive`
 - refreshing the page or restarting the service recovers the stored active or
   ending drive rather than starting a new timer
 - the active drive is household/server state, not browser-session state; its
@@ -604,6 +626,39 @@ During active drive:
 - every authorized dashboard request queries SQLite for the single active or
   ending row; active elapsed time is reconstructed from `started_at_utc`, while
   ending state resumes the completion form with its provisional end
+
+#### Live client clock
+
+The live state response includes:
+
+- stable live-drive ID and state
+- canonical `started_at_utc`
+- formatted local start time and timezone abbreviation
+- current `server_now_utc`
+- current solar theme
+- the next 48 hours of solar theme-boundary UTC instants
+
+At response receipt, the client calculates the authoritative elapsed baseline
+from `server_now_utc - started_at_utc`, captures both `performance.now()` and
+`Date.now()`, and derives a server-to-device wall-clock offset. While visible,
+it redraws once per second from the baseline plus monotonic elapsed time; it
+never increments a counter that can accumulate timer drift.
+
+On return from iOS suspension, rebase immediately from
+`Date.now() + server_offset - started_at_utc` so elapsed duration and solar
+boundaries catch up even before the network is available. Mark that projection
+as awaiting server confirmation, then replace the offset after a successful
+resynchronization. A material disagreement between monotonic and adjusted wall
+time also triggers this rebase and resynchronization path.
+
+No per-second network requests are made. Resynchronize live state and server
+time only on initial load, return from background/visibility change, explicit
+reconnect, exhaustion of the supplied boundary schedule, or a
+start/end/resume/cancel/finalize mutation. If the network is unavailable, the
+projected timer and supplied theme schedule continue locally and the interface
+clearly marks server synchronization as pending. Persisted duration and end time
+always come from server-owned UTC timestamps or an explicitly corrected end
+time, never from the projected display counter.
 
 End flow:
 
@@ -1116,6 +1171,9 @@ raising an exception inside one connection.
 
 Playwright WebKit runs at representative iPhone viewport sizes and verifies:
 
+- light theme during the solar day and dark theme during solar night
+- day-to-night and night-to-day theme flips at exact supplied boundaries
+- native `color-scheme` and browser `theme-color` update with the page palette
 - dashboard gauge and night total without horizontal scrolling
 - minimum touch-target sizing and readable entry controls
 - manual entry validation and warning acknowledgement
@@ -1125,6 +1183,12 @@ Playwright WebKit runs at representative iPhone viewport sizes and verifies:
   reauthentication
 - start, elapsed display, durable ending state, resume, finalization, cancel,
   double-tap, and refresh behavior
+- fixed local start-time display and drift-free `H:MM:SS` duration updates
+- no recurring HTTP requests while observing a live timer for at least 65
+  seconds
+- continued timer and theme-boundary projection while network requests fail
+- background/suspend return immediately catches up elapsed time and theme before
+  successful server resynchronization
 - end-request retry after a response is lost
 - active-drive recovery in a fresh browser context with no cookies or local
   storage
@@ -1176,6 +1240,7 @@ These should be handled explicitly during implementation:
 - durability pragmas, migrations, integrity checks, and idempotency
 - seed import
 - dashboard
+- solar-driven light/dark system UI
 - manual entry
 - drive list, edit, and delete
 - CSV export/import
@@ -1190,6 +1255,7 @@ These should be handled explicitly during implementation:
 
 - live-drive start/end/cancel
 - durable ending-state recovery and resume
+- client-projected live start time, duration, and solar-boundary theme changes
 - user-level `systemd` service helpers
 - Tailscale-forwarded deployment docs
 - operational health, doctor, and structured logging
@@ -1213,6 +1279,10 @@ These should be handled explicitly during implementation:
   supplied and warn before DMV-facing export.
 - Dashboard: show all recorded time as progress toward 60 hours. Flag any week
   over 10 hours and show its overage without reducing the displayed total.
+- Theme: light during the Apex solar day and dark during solar night, using the
+  same 15-minute sunrise/sunset offsets as drive classification.
+- Live display: show local start time and `H:MM:SS` duration, projected
+  client-side between server synchronization events with no per-second requests.
 - Web access: Tailscale HTTPS plus mandatory application authentication and
   CSRF protection.
 - External archive destination: not yet selected; deployment must configure one
