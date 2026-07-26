@@ -16,10 +16,10 @@
         style="--total-progress: {{ [100, totals.total_minutes / 36] | min }}; --night-progress: {{ [100, totals.night_minutes / 6] | min }}"
       >
         <svg viewBox="0 0 240 140" role="img" aria-label="{{ (totals.total_minutes / 36) | round(1) }} percent of required driving completed">
-          <path class="progress-track progress-track-total" pathLength="100" d="M 20 120 A 100 100 0 0 1 220 120"></path>
-          <path class="progress-arc progress-arc-total" pathLength="100" d="M 20 120 A 100 100 0 0 1 220 120"></path>
-          <path class="progress-track progress-track-night" pathLength="100" d="M 48 120 A 72 72 0 0 1 192 120"></path>
-          <path class="progress-arc progress-arc-night" pathLength="100" d="M 48 120 A 72 72 0 0 1 192 120"></path>
+          <path fill="none" class="progress-track progress-track-total" pathLength="100" d="M 20 120 A 100 100 0 0 1 220 120"></path>
+          <path fill="none" class="progress-arc progress-arc-total" pathLength="100" d="M 20 120 A 100 100 0 0 1 220 120"></path>
+          <path fill="none" class="progress-track progress-track-night" pathLength="100" d="M 48 120 A 72 72 0 0 1 192 120"></path>
+          <path fill="none" class="progress-arc progress-arc-night" pathLength="100" d="M 48 120 A 72 72 0 0 1 192 120"></path>
         </svg>
         <div class="progress-percent">
           <strong>{{ (totals.total_minutes / 36) | round(1) }}%</strong>

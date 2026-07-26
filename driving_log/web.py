@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -115,6 +116,10 @@ def _actor(request: Request) -> str | None:
 def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
+    asset_digest = hashlib.sha256()
+    for asset_name in ("app.css", "app.js"):
+        asset_digest.update((PACKAGE_DIR / "static" / asset_name).read_bytes())
+    asset_version = asset_digest.hexdigest()[:12]
     records = RecordService(database)
     live = LiveDriveService(database)
 
@@ -126,6 +131,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             "request": request,
             "token": token,
             "format_minutes": _format_minutes,
+            "asset_version": asset_version,
             **_theme_context(),
             **values,
         }

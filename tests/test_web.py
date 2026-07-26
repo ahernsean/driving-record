@@ -54,6 +54,10 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(dashboard.status_code, 200)
                 self.assertIn("Start a drive", dashboard.text)
                 self.assertNotIn("login", dashboard.text.lower())
+                self.assertRegex(
+                    dashboard.text,
+                    r"/static/app\.css\?v=[0-9a-f]{12}",
+                )
                 response = await client.post(
                     "/drives",
                     headers={"Origin": "http://testserver"},

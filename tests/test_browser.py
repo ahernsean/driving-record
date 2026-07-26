@@ -83,6 +83,11 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert "Daniel Driving Log" in page.title()
                 assert page.locator(".progress-card").is_visible()
                 assert page.locator(".progress-arc-total").is_visible()
+                assert (
+                    page.locator(".progress-arc-total").evaluate("el => getComputedStyle(el).fill")
+                    == "none"
+                )
+                assert "?v=" in page.locator('link[rel="stylesheet"]').get_attribute("href")
                 assert page.locator("text=Night driving").is_visible()
                 overflow = page.evaluate(
                     "document.documentElement.scrollWidth - document.documentElement.clientWidth"
