@@ -40,8 +40,9 @@ The form text also states:
 - at least 10 hours at night
 - no more than 10 hours per week may count toward the 60 hours
 
-The product should track the 10-hours-per-week rule and flag it in the UI,
-even if the first version does not block entry on that basis.
+The product should track the 10-hours-per-week rule as an advisory. It must
+continue recording and totaling every valid drive, while clearly flagging the
+drive that causes a week's total to exceed 10 hours.
 
 ### Existing seed records
 
@@ -132,7 +133,7 @@ Examples:
 - `long_drive`
 - `crosses_midnight`
 - `overlaps_existing_drive`
-- `exceeds_weekly_countable_cap`
+- `exceeds_weekly_cap`
 - `seed_ambiguous_duration`
 - `seed_possible_duplicate`
 
@@ -292,30 +293,22 @@ Allow save, but show prominent warnings when:
 - duration exceeds 5 hours
 - drive crosses midnight
 - drive overlaps another saved drive
-- weekly countable total would exceed 10 hours for that week
+- the drive would cause its week's total to exceed 10 hours
 - imported row required inferred duration or other assumptions
 
 ### Weekly cap handling
 
 The DMV form states that no more than 10 hours per week may count toward the 60.
 
-The two totals have different meanings:
-
-- `actual_total_minutes` is every valid minute recorded in the log.
-- `countable_total_minutes` is the amount that can count toward the DMV's
-  60-hour requirement after limiting each week to 10 hours.
-
-For example, if 12 hours were logged in one week, the actual total would
-increase by 12 hours but the DMV-countable total would increase by at most
-10 hours.
-
 Recommended behavior:
 
-- keep `actual_total_minutes` as the sum of all drives
-- also compute `countable_total_minutes` using the 10-hour-per-week cap
-- show the DMV-countable total as the primary 60-hour progress value
-- show the actual total and a clear weekly-cap warning only if the values diverge
-- use `countable_total_minutes` for readiness status
+- keep `total_minutes` as the sum of every valid drive
+- use `total_minutes` for the primary 60-hour progress gauge
+- compute each week's total without altering the recorded drives or grand total
+- when a drive takes a week over 10 hours, save an `exceeds_weekly_cap` warning
+  that identifies the week, its total, and the overage amount
+- show over-cap weeks prominently on the dashboard and drive list
+- allow the drive to be saved after the warning is acknowledged
 
 The supplied form does not define the week boundary. Use a documented calendar
 week convention in version 1 and keep that convention configurable. Before
@@ -332,10 +325,11 @@ Primary landing page.
 
 Shows:
 
-- circular progress gauge for `countable_total / 60 hours`
+- circular progress gauge for `total_minutes / 60 hours`
 - separate night progress gauge or clear secondary stat for `night / 10 hours`
 - numeric totals:
-  `countable total`, `actual total`, `night total`, `remaining`
+  `total`, `night total`, `remaining`
+- advisory card listing any weeks over the 10-hour cap and each overage amount
 - active live-drive banner if a drive is in progress
 - quick actions:
   `Start a drive`, `Add drive manually`, `View drives`, `Import`, `Export`
@@ -614,8 +608,8 @@ These should be handled explicitly during implementation:
    not automatic deletion.
 3. The Road Ready PDF and `log.txt` may overlap in chronology in future
    revisions. Provenance plus overlap warnings are required.
-4. The DMV's 10-hours-per-week counting rule should be represented in the
-   readiness calculation, not buried in notes.
+4. The DMV's 10-hours-per-week counting rule should produce a prominent
+   advisory warning without reducing the authoritative logged-hours total.
 
 ## Recommended Delivery Phases
 
@@ -648,5 +642,5 @@ These should be handled explicitly during implementation:
 - Timezone: `America/New_York`.
 - Supervisor DL number and state: not yet available; keep nullable until
   supplied and warn before DMV-facing export.
-- Dashboard: show DMV-countable progress toward 60 hours. Show the actual total
-  separately only when a weekly cap causes the values to differ.
+- Dashboard: show all recorded time as progress toward 60 hours. Flag any week
+  over 10 hours and show its overage without reducing the displayed total.
