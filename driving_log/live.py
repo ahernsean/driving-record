@@ -22,7 +22,7 @@ class LiveDriveService:
 
     def current(self, connection: sqlite3.Connection | None = None) -> sqlite3.Row | None:
         owned = connection is None
-        selected = connection or self.database.connect()
+        selected = connection or self.database.connect_readonly()
         try:
             return cast(
                 sqlite3.Row | None,
@@ -34,6 +34,13 @@ class LiveDriveService:
         finally:
             if owned:
                 selected.close()
+
+    def find(self, live_id: str) -> sqlite3.Row:
+        connection = self.database.connect_readonly()
+        try:
+            return self.get(live_id, connection)
+        finally:
+            connection.close()
 
     @staticmethod
     def get(live_id: str, connection: sqlite3.Connection) -> sqlite3.Row:
@@ -266,6 +273,10 @@ class LiveDriveService:
             end = corrected_end_utc or datetime.fromisoformat(
                 row["provisional_ended_at_utc"].replace("Z", "+00:00")
             )
+            if (end - start).total_seconds() < 30:
+                raise ValueError("drive must be at least 30 seconds")
+            start = start.replace(second=0, microsecond=0)
+            end = end.replace(second=0, microsecond=0)
             drive_id = str(uuid.uuid5(uuid.UUID(live_id), "completed-drive"))
             drive = RecordService(self.database).create(
                 DriveInput(

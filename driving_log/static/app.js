@@ -99,25 +99,15 @@
   scheduleTheme();
 
   function localInputMilliseconds(value) {
-    const match = value.match(
-      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/
-    );
-    if (!match) return NaN;
-    return Date.UTC(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4]),
-      Number(match[5])
-    );
+    return new Date(value).getTime();
   }
 
   function formatLocalInput(milliseconds) {
     const value = new Date(milliseconds);
     const pad = number => String(number).padStart(2, "0");
     return (
-      `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}` +
-      `T${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}`
+      `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}` +
+      `T${pad(value.getHours())}:${pad(value.getMinutes())}`
     );
   }
 

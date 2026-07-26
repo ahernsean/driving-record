@@ -73,6 +73,18 @@ class RecordTests(ServiceCase):
                 )
             )
 
+    def test_repeated_local_time_is_resolved_but_visibly_flagged(self) -> None:
+        start = datetime(2026, 11, 1, 1, 30, tzinfo=self.zone, fold=0).astimezone(UTC)
+        drive = self.service.create(
+            self.drive(
+                started_at_utc=start,
+                ended_at_utc=start + timedelta(minutes=30),
+            )
+        )
+        warnings = self.service.warnings_for(drive["id"])
+        self.assertIn("ambiguous_local_time", {warning["code"] for warning in warnings})
+        self.assertIn("first occurrence", warnings[0]["message"])
+
     def test_create_retry_conflict_edit_and_delete(self) -> None:
         request = str(uuid.uuid4())
         created = self.service.create(self.drive(), request_id=request)
@@ -134,6 +146,11 @@ class RecordTests(ServiceCase):
         second = self.service.create(self.drive(start + timedelta(minutes=300), 300))
         warnings = self.service.warnings_for(first["id"])
         self.assertEqual({warning["code"] for warning in warnings}, {"long_drive", "overlap"})
+        second_warnings = self.service.warnings_for(second["id"])
+        self.assertEqual(
+            {warning["code"] for warning in second_warnings},
+            {"overlap", "weekly_overage"},
+        )
         totals = self.service.totals()
         self.assertEqual(totals["total_minutes"], 601)
         self.assertEqual(totals["weeks"][0]["overage_minutes"], 1)  # type: ignore[index]

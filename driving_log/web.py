@@ -53,6 +53,11 @@ def _format_local_datetime(value: str | datetime) -> str:
     )
 
 
+def _format_local_date(value: str | datetime) -> str:
+    local = _local_datetime(value)
+    return f"{local.strftime('%A')}, {local.strftime('%b')} {local.day}, {local.year}"
+
+
 def _local_input_value(value: str | datetime) -> str:
     return _local_datetime(value).strftime("%Y-%m-%dT%H:%M")
 
@@ -109,6 +114,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             "request": request,
             "format_minutes": _format_minutes,
             "format_local_datetime": _format_local_datetime,
+            "format_local_date": _format_local_date,
             "asset_version": asset_version,
             **_theme_context(),
             **values,
@@ -138,6 +144,19 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             status_code=404,
         )
 
+    @app.exception_handler(ValueError)
+    @app.exception_handler(KeyError)
+    async def invalid_form_handler(request: Request, exc: ValueError | KeyError) -> HTMLResponse:
+        message = (
+            f"Missing required field: {exc.args[0]}" if isinstance(exc, KeyError) else str(exc)
+        )
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            common(request, title="Invalid form", message=message),
+            status_code=400,
+        )
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request) -> HTMLResponse:
         totals = records.totals()
@@ -163,7 +182,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.get("/drives", response_class=HTMLResponse)
     async def drive_list(request: Request) -> HTMLResponse:
         drives = records.list_drives()
-        enriched = [{"row": row, "warnings": records.warnings_for(row["id"])} for row in drives]
+        warnings = records.warnings_for_many()
+        enriched = [{"row": row, "warnings": warnings.get(row["id"], [])} for row in drives]
         return templates.TemplateResponse(
             request,
             "drives.html",
@@ -358,8 +378,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/live/{live_id}/finalize")
     async def live_finalize(request: Request, live_id: str) -> RedirectResponse:
         form = await read_form(request)
-        current = live.current()
-        if not current or current["id"] != live_id:
+        current = live.find(live_id)
+        if current["status"] not in ("ending", "completed"):
             raise ConflictError("live drive is no longer awaiting finalization")
         start_text = str(form["started_at_local"])
         end_text = str(form["ended_at_local"])
@@ -388,7 +408,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.get("/imports", response_class=HTMLResponse)
     async def imports_page(request: Request) -> HTMLResponse:
-        connection = database.connect()
+        connection = database.connect_readonly()
         batches = connection.execute(
             "SELECT * FROM import_batches ORDER BY imported_at DESC"
         ).fetchall()

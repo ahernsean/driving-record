@@ -11,7 +11,12 @@ from typing import cast
 
 from driving_log.config import APEX_LATITUDE, APEX_LONGITUDE, DEFAULT_TIMEZONE
 from driving_log.db import Database, utc_now_text
-from driving_log.solar import SOLAR_CALCULATION_VERSION, week_segments
+from driving_log.solar import (
+    SOLAR_CALCULATION_VERSION,
+    AmbiguousLocalTimeError,
+    resolve_local,
+    week_segments,
+)
 from driving_log.validation import validate_interval, validate_road_type
 
 
@@ -393,36 +398,102 @@ class RecordService:
         }
 
     def warnings_for(self, drive_id: str) -> list[dict[str, str]]:
+        warnings = self.warnings_for_many()
+        if drive_id not in warnings:
+            self.get(drive_id)
+        return warnings[drive_id]
+
+    def warnings_for_many(self) -> dict[str, list[dict[str, str]]]:
         connection = self.database.connect_readonly()
-        drive = self.get(drive_id, connection=connection)
-        warnings: list[dict[str, str]] = []
-        if drive["duration_minutes"] > 300:
-            warnings.append({"code": "long_drive", "message": "Drive exceeds five hours"})
+        try:
+            drives = connection.execute(
+                "SELECT * FROM drives WHERE deleted_at IS NULL ORDER BY started_at_utc, id"
+            ).fetchall()
+            persisted = connection.execute(
+                """
+                SELECT drive_id, warning_code, warning_message
+                FROM drive_warnings ORDER BY created_at, id
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+
+        warnings: dict[str, list[dict[str, str]]] = {str(drive["id"]): [] for drive in drives}
+        intervals: dict[str, tuple[datetime, datetime]] = {}
         from zoneinfo import ZoneInfo
 
-        zone = ZoneInfo(drive["timezone_name"])
-        start = datetime.fromisoformat(drive["started_at_utc"].replace("Z", "+00:00"))
-        end = datetime.fromisoformat(drive["ended_at_utc"].replace("Z", "+00:00"))
-        if start.astimezone(zone).date() != end.astimezone(zone).date():
-            warnings.append({"code": "crosses_midnight", "message": "Drive crosses midnight"})
-        overlaps = connection.execute(
-            """
-            SELECT id FROM drives WHERE id != ? AND deleted_at IS NULL
-            AND started_at_utc < ? AND ended_at_utc > ? ORDER BY started_at_utc
-            """,
-            (drive_id, drive["ended_at_utc"], drive["started_at_utc"]),
-        ).fetchall()
-        persisted = connection.execute(
-            "SELECT warning_code, warning_message FROM drive_warnings WHERE drive_id=?",
-            (drive_id,),
-        ).fetchall()
-        connection.close()
-        for overlap in overlaps:
-            warnings.append(
-                {
-                    "code": "overlap",
-                    "message": f"Overlaps drive {overlap['id']}",
-                }
-            )
-        warnings.extend({"code": row[0], "message": row[1]} for row in persisted)
+        for drive in drives:
+            drive_id = str(drive["id"])
+            start = datetime.fromisoformat(str(drive["started_at_utc"]).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(drive["ended_at_utc"]).replace("Z", "+00:00"))
+            intervals[drive_id] = (start, end)
+            if drive["duration_minutes"] > 300:
+                warnings[drive_id].append(
+                    {"code": "long_drive", "message": "Drive exceeds five hours"}
+                )
+            zone = ZoneInfo(str(drive["timezone_name"]))
+            if start.astimezone(zone).date() != end.astimezone(zone).date():
+                warnings[drive_id].append(
+                    {"code": "crosses_midnight", "message": "Drive crosses midnight"}
+                )
+            for label, instant in (("start", start), ("end", end)):
+                local = instant.astimezone(zone).replace(tzinfo=None)
+                try:
+                    resolve_local(local, str(drive["timezone_name"]))
+                except AmbiguousLocalTimeError:
+                    first = resolve_local(local, str(drive["timezone_name"]), fold=0).astimezone(
+                        UTC
+                    )
+                    occurrence = "first" if first == instant else "second"
+                    warnings[drive_id].append(
+                        {
+                            "code": "ambiguous_local_time",
+                            "message": (
+                                f"Drive {label} uses the {occurrence} occurrence "
+                                "of a repeated local time"
+                            ),
+                        }
+                    )
+
+        for index, first in enumerate(drives):
+            first_id = str(first["id"])
+            first_start, first_end = intervals[first_id]
+            for second in drives[index + 1 :]:
+                second_id = str(second["id"])
+                second_start, second_end = intervals[second_id]
+                if first_start < second_end and first_end > second_start:
+                    warnings[first_id].append(
+                        {"code": "overlap", "message": f"Overlaps drive {second_id}"}
+                    )
+                    warnings[second_id].append(
+                        {"code": "overlap", "message": f"Overlaps drive {first_id}"}
+                    )
+
+        weekly_minutes: dict[str, int] = {}
+        for drive in drives:
+            drive_id = str(drive["id"])
+            start, end = intervals[drive_id]
+            for week_start, _, minutes in week_segments(start, end):
+                key = week_start.isoformat()
+                before = weekly_minutes.get(key, 0)
+                if before <= 600 < before + minutes:
+                    local_week = week_start.astimezone(ZoneInfo(str(drive["timezone_name"])))
+                    warnings[drive_id].append(
+                        {
+                            "code": "weekly_overage",
+                            "message": (
+                                "This drive first put the week beginning "
+                                f"{local_week:%A, %b %-d, %Y} over the "
+                                "10-hour advisory"
+                            ),
+                        }
+                    )
+                weekly_minutes[key] = before + minutes
+
+        for row in persisted:
+            drive_warnings = warnings.get(str(row["drive_id"]))
+            if drive_warnings is not None:
+                drive_warnings.append(
+                    {"code": row["warning_code"], "message": row["warning_message"]}
+                )
         return warnings

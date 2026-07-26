@@ -51,7 +51,11 @@
     <section class="warning-card">
       <h2>Weekly cap review</h2>
       {% for week in overages %}
-        <p>{{ format_minutes(week.overage_minutes) }} over the 10-hour advisory.</p>
+        <p>
+          Week beginning {{ format_local_date(week.week_start_utc) }}:
+          {{ format_minutes(week.overage_minutes) }} over the 10-hour advisory.
+          <a href="/drives/{{ week.first_overage_drive_id }}">Review the drive that crossed the cap.</a>
+        </p>
       {% endfor %}
     </section>
   {% endif %}

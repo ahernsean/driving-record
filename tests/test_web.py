@@ -68,6 +68,16 @@ class WebTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 303)
+                malformed = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "started_at_local": "not-a-date",
+                        "ended_at_local": "2026-07-20T12:30",
+                    },
+                )
+                self.assertEqual(malformed.status_code, 400)
+                self.assertIn("Invalid form", malformed.text)
                 detail = await client.get(response.headers["location"])
                 self.assertIn("30m", detail.text)
                 self.assertNotIn("Supervisor license", detail.text)
@@ -199,17 +209,25 @@ class WebTests(unittest.TestCase):
                     self.assertIsNotNone(start_match)
                     # The HTTP scenario is intentionally short, so correct the end into
                     # the future enough to produce a valid minute-based record.
+                    finalization_data = {
+                        "request_id": str(uuid.uuid4()),
+                        "road_type": "local",
+                        "started_at_local": start_match.group(1),  # type: ignore[union-attr]
+                        "ended_at_local": "2026-07-27T12:00",
+                    }
                     finalized = await newest.post(
                         f"/live/{selected_id}/finalize",
                         headers={"Origin": "http://testserver"},
-                        data={
-                            "request_id": str(uuid.uuid4()),
-                            "road_type": "local",
-                            "started_at_local": start_match.group(1),  # type: ignore[union-attr]
-                            "ended_at_local": "2026-07-27T12:00",
-                        },
+                        data=finalization_data,
                     )
                     self.assertEqual(finalized.status_code, 303)
+                    replay = await newest.post(
+                        f"/live/{selected_id}/finalize",
+                        headers={"Origin": "http://testserver"},
+                        data=finalization_data,
+                    )
+                    self.assertEqual(replay.status_code, 303)
+                    self.assertEqual(replay.headers["location"], finalized.headers["location"])
                     dashboard = await newest.get("/")
                     self.assertIn("Recorded drives", dashboard.text)
 
