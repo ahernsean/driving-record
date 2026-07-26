@@ -17,4 +17,3 @@ if [ -x "$ROOT/.venv/bin/python" ]; then
   exec "$ROOT/.venv/bin/python" -m driving_log.cli "$@"
 fi
 exec python3.13 -m driving_log.cli "$@"
-
