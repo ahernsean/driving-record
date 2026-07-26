@@ -57,13 +57,17 @@ def install_user_units(
             if "=" in line and not line.startswith("#"):
                 key, value = line.split("=", 1)
                 existing[key] = value
-    secret = existing.get("DRIVING_LOG_FORM_SECRET") or secrets.token_urlsafe(48)
+    secret = (
+        existing.get("DRIVING_LOG_OPERATION_SECRET")
+        or existing.get("DRIVING_LOG_FORM_SECRET")
+        or secrets.token_urlsafe(48)
+    )
     environment = {
         "DRIVING_LOG_HOST": "127.0.0.1",
         "DRIVING_LOG_PORT": "8766",
         "DRIVING_LOG_PUBLIC_HOST": public_host,
         "DRIVING_LOG_PUBLIC_SCHEME": public_scheme,
-        "DRIVING_LOG_FORM_SECRET": secret,
+        "DRIVING_LOG_OPERATION_SECRET": secret,
     }
     selected_external = (
         str(external_archive_dir.expanduser().resolve())

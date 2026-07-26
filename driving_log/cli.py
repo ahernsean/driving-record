@@ -250,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
             args.operation_id,
             settings.restore_dir,
             settings.database_path,
-            settings.form_secret,
+            settings.operation_secret,
         )
         print(result_path)
         return 0

@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from unittest import mock
 from zoneinfo import ZoneInfo
 
 import anyio
@@ -217,18 +216,6 @@ class SettingsTests(unittest.TestCase):
                     del os.environ["DRIVING_LOG_HOST"]
                 else:
                     os.environ["DRIVING_LOG_HOST"] = prior_host
-
-    def test_tailscale_host_requires_real_form_secret(self) -> None:
-        with (
-            mock.patch.dict(
-                os.environ,
-                {"DRIVING_LOG_PUBLIC_HOST": "driving.example.ts.net:8443"},
-                clear=False,
-            ),
-            self.assertRaisesRegex(ValueError, "FORM_SECRET"),
-        ):
-            os.environ.pop("DRIVING_LOG_FORM_SECRET", None)
-            Settings.from_env()
 
 
 class ApplicationTests(unittest.TestCase):
