@@ -5,6 +5,8 @@ import hashlib
 import io
 import json
 import sqlite3
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -254,6 +256,32 @@ class ArchiveTests(ServiceCase):
             self.assertRaises(BlockingIOError),
         ):
             restore_archive(self.path, archive, confirm=True)
+
+    def test_uncommitted_subprocess_crash_rolls_back_cleanly(self) -> None:
+        script = (
+            "import os, sqlite3, sys;"
+            "connection=sqlite3.connect(sys.argv[1], isolation_level=None);"
+            "connection.execute('PRAGMA journal_mode=WAL');"
+            "connection.execute('BEGIN IMMEDIATE');"
+            "connection.execute("
+            "\"INSERT INTO configuration VALUES ('crash-test','uncommitted','now')\""
+            ");"
+            "os._exit(19)"
+        )
+        crashed = subprocess.run(
+            [sys.executable, "-c", script, str(self.path)],
+            check=False,
+        )
+        self.assertEqual(crashed.returncode, 19)
+        connection = self.database.connect()
+        try:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM configuration WHERE key='crash-test'"
+            ).fetchone()[0]
+            self.assertEqual(count, 0)
+            self.assertEqual(connection.execute("PRAGMA quick_check").fetchone()[0], "ok")
+        finally:
+            connection.close()
 
 
 class SeedParserTests(unittest.TestCase):
