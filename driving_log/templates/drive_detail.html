@@ -9,7 +9,6 @@
     <div><span>Road</span><strong>{{ drive.road_type }}</strong></div>
     <div><span>Weather</span><strong>{{ drive.weather or "—" }}</strong></div>
     <div><span>Supervisor</span><strong>{{ drive.supervisor_name or "Missing" }}</strong></div>
-    <div><span>Supervisor license</span><strong>{{ (drive.supervisor_dl_number ~ " " ~ drive.supervisor_dl_state) if drive.supervisor_dl_number else "Missing — add before DMV submission" }}</strong></div>
     <div><span>Source</span><strong>{{ drive.source }}</strong></div>
   </section>
   {% if warnings %}

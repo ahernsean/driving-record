@@ -26,15 +26,6 @@
     <label>Supervising driver
       <input name="supervisor_name" value="{{ drive.supervisor_name if drive and drive.supervisor_name else 'Sean Ahern' }}">
     </label>
-    <div class="two-column">
-      <label>Supervisor license
-        <input name="supervisor_dl_number" autocomplete="off" value="{{ drive.supervisor_dl_number if drive and drive.supervisor_dl_number else '' }}">
-      </label>
-      <label>State
-        <input name="supervisor_dl_state" maxlength="2" value="{{ drive.supervisor_dl_state if drive and drive.supervisor_dl_state else '' }}">
-      </label>
-    </div>
-    <p class="field-note">License details are optional, but required before DMV submission.</p>
     <fieldset>
       <legend>Road type</legend>
       {% for kind in ("local", "highway", "mixed", "unknown") %}

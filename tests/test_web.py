@@ -69,6 +69,7 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 303)
                 detail = await client.get(response.headers["location"])
                 self.assertIn("30m", detail.text)
+                self.assertNotIn("Supervisor license", detail.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", detail.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:30 PM EDT", detail.text)
                 self.assertNotIn("Started (UTC)", detail.text)
@@ -76,6 +77,9 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Drive history", listing.text)
                 self.assertIn("local", listing.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", listing.text)
+                manual_form = await client.get("/drives/new")
+                self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
+                self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
 
         self.run_async(scenario)
 
@@ -131,6 +135,9 @@ class WebTests(unittest.TestCase):
                 ) as newest:
                     completion = await newest.get("/live")
                     self.assertIn("The end time is safely stored", completion.text)
+                    self.assertNotIn('name="acknowledge_warnings"', completion.text)
+                    self.assertNotIn('name="supervisor_dl_number"', completion.text)
+                    self.assertNotIn('name="supervisor_dl_state"', completion.text)
                     # The HTTP scenario is intentionally short, so correct the end into
                     # the future enough to produce a valid minute-based record.
                     finalized = await newest.post(
@@ -140,7 +147,6 @@ class WebTests(unittest.TestCase):
                             "request_id": str(uuid.uuid4()),
                             "road_type": "local",
                             "corrected_end_local": "2026-07-27T12:00",
-                            "acknowledge_warnings": "yes",
                         },
                     )
                     self.assertEqual(finalized.status_code, 303)

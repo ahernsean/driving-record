@@ -237,8 +237,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             DriveInput(
                 driver_name=str(form.get("driver_name", "Daniel Ahern")),
                 supervisor_name=str(form.get("supervisor_name", "")) or None,
-                supervisor_dl_number=str(form.get("supervisor_dl_number", "")) or None,
-                supervisor_dl_state=str(form.get("supervisor_dl_state", "")) or None,
+                supervisor_dl_number=None,
+                supervisor_dl_state=None,
                 started_at_utc=_parse_local(
                     str(form["started_at_local"]), str(form.get("start_fold", ""))
                 ),
@@ -292,8 +292,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         value = DriveInput(
             driver_name=str(form.get("driver_name", current["driver_name"])),
             supervisor_name=str(form.get("supervisor_name", "")) or None,
-            supervisor_dl_number=str(form.get("supervisor_dl_number", "")) or None,
-            supervisor_dl_state=str(form.get("supervisor_dl_state", "")) or None,
+            supervisor_dl_number=current["supervisor_dl_number"],
+            supervisor_dl_state=current["supervisor_dl_state"],
             started_at_utc=_parse_local(
                 str(form["started_at_local"]), str(form.get("start_fold", ""))
             ),
@@ -388,9 +388,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         if not current or current["id"] != live_id:
             raise ConflictError("live drive is no longer awaiting finalization")
         corrected_end = _parse_local(corrected_text) if corrected_text else None
-        preview = _live_preview(database, records, current, corrected_end)
-        if preview["warnings"] and form.get("acknowledge_warnings") != "yes":
-            raise HTTPException(status_code=400, detail="review and acknowledge drive warnings")
         drive = live.finalize(
             live_id,
             request_id=str(form["request_id"]),
@@ -398,8 +395,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             weather=str(form.get("weather", "")),
             notes=str(form.get("notes", "")),
             supervisor_name=str(form.get("supervisor_name", "")) or None,
-            supervisor_dl_number=str(form.get("supervisor_dl_number", "")) or None,
-            supervisor_dl_state=str(form.get("supervisor_dl_state", "")) or None,
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),
         )
