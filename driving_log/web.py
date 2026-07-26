@@ -55,7 +55,8 @@ def _format_local_datetime(value: str | datetime) -> str:
     local = _local_datetime(value)
     hour = local.strftime("%I").lstrip("0") or "0"
     return (
-        f"{local.strftime('%b')} {local.day}, {local.year} at {hour}:{local.strftime('%M %p %Z')}"
+        f"{local.strftime('%A')}, {local.strftime('%b')} {local.day}, "
+        f"{local.year} at {hour}:{local.strftime('%M %p %Z')}"
     )
 
 

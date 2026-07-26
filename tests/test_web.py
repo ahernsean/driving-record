@@ -76,24 +76,24 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 303)
                 detail = await client.get(response.headers["location"])
                 self.assertIn("30m", detail.text)
-                self.assertIn("Jul 20, 2026 at 12:00 PM EDT", detail.text)
-                self.assertIn("Jul 20, 2026 at 12:30 PM EDT", detail.text)
+                self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", detail.text)
+                self.assertIn("Monday, Jul 20, 2026 at 12:30 PM EDT", detail.text)
                 self.assertNotIn("Started (UTC)", detail.text)
                 listing = await client.get("/drives")
                 self.assertIn("Drive history", listing.text)
                 self.assertIn("local", listing.text)
-                self.assertIn("Jul 20, 2026 at 12:00 PM EDT", listing.text)
+                self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", listing.text)
 
         self.run_async(scenario)
 
     def test_timestamp_formatter_uses_local_date_and_dst_offset(self) -> None:
         self.assertEqual(
             _format_local_datetime("2026-07-20T02:30:00Z"),
-            "Jul 19, 2026 at 10:30 PM EDT",
+            "Sunday, Jul 19, 2026 at 10:30 PM EDT",
         )
         self.assertEqual(
             _format_local_datetime("2026-01-20T17:30:00Z"),
-            "Jan 20, 2026 at 12:30 PM EST",
+            "Tuesday, Jan 20, 2026 at 12:30 PM EST",
         )
 
     @pytest.mark.security
