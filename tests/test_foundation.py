@@ -50,6 +50,10 @@ class DatabaseTests(unittest.TestCase):
         )
         connection.close()
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        for suffix in ("-wal", "-shm"):
+            sidecar = self.path.with_name(f"{self.path.name}{suffix}")
+            if sidecar.exists():
+                self.assertEqual(sidecar.stat().st_mode & 0o777, 0o600)
 
     def test_refuses_schema_newer_than_application(self) -> None:
         database = Database(self.path)
@@ -155,6 +159,13 @@ class TimeTests(unittest.TestCase):
         value = validate_interval(start, start + timedelta(hours=5, minutes=1))
         self.assertEqual(value.duration_minutes, 301)
         self.assertIn("long_drive", value.warnings)
+        midnight_utc = datetime(2026, 7, 1, 23, 30, tzinfo=UTC)
+        local_interval = validate_interval(
+            midnight_utc,
+            midnight_utc + timedelta(hours=1),
+            timezone_name="America/New_York",
+        )
+        self.assertNotIn("crosses_midnight", local_interval.warnings)
         with self.assertRaises(ValueError):
             validate_interval(start, start)
         with self.assertRaisesRegex(ValueError, "minute-aligned"):

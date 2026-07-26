@@ -47,7 +47,17 @@ class Database:
             connection.close()
             raise DatabaseError(f"failed to enable WAL mode: {mode}")
         connection.execute("PRAGMA synchronous = FULL")
+        self._restrict_database_files()
         return connection
+
+    def _restrict_database_files(self) -> None:
+        for path in (
+            self.path,
+            self.path.with_name(f"{self.path.name}-wal"),
+            self.path.with_name(f"{self.path.name}-shm"),
+        ):
+            if path.exists():
+                os.chmod(path, 0o600)
 
     def initialize(self) -> None:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -101,17 +111,21 @@ class Database:
         for migration in MIGRATIONS:
             if migration.version <= current:
                 continue
-            name = migration.name.replace("'", "''")
-            checksum = migration.checksum.replace("'", "''")
-            applied_at = utc_now_text().replace("'", "''")
             try:
-                connection.executescript(
-                    "BEGIN IMMEDIATE;\n"
-                    f"{migration.sql}\n"
-                    "INSERT INTO schema_migrations VALUES "
-                    f"({migration.version}, '{name}', '{checksum}', '{applied_at}');\n"
-                    "COMMIT;"
+                connection.executescript(f"BEGIN IMMEDIATE;\n{migration.sql}\n")
+                connection.execute(
+                    """
+                    INSERT INTO schema_migrations (version, name, checksum, applied_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        migration.version,
+                        migration.name,
+                        migration.checksum,
+                        utc_now_text(),
+                    ),
                 )
+                connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
