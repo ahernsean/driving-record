@@ -95,6 +95,7 @@ The production baseline is:
 - Jinja2 3.1.6
 - python-multipart 0.0.32
 - Astral 3.2
+- tzdata 2026.3
 
 The implementation must commit separate runtime and test lock files containing
 all transitive versions and package hashes. `./driving-log bootstrap` creates a
@@ -127,11 +128,18 @@ Fields:
 - `supervisor_name`
 - `supervisor_dl_number`
 - `supervisor_dl_state`
-- `started_at_local` local wall time in `America/New_York`
-- `ended_at_local` local wall time in `America/New_York`
+- `started_at_utc` canonical UTC instant
+- `ended_at_utc` canonical UTC instant
+- `timezone_name`, normally `America/New_York`
+- `started_utc_offset_minutes`
+- `ended_utc_offset_minutes`
 - `duration_minutes`
 - `day_minutes`
 - `night_minutes`
+- `solar_calculation_version`
+- `solar_latitude`
+- `solar_longitude`
+- `tzdata_version`
 - `road_type` enum-like text: `local`, `highway`, `mixed`, `unknown`
 - `weather` free text
 - `notes` free text
@@ -146,7 +154,7 @@ Fields:
 
 Rules:
 
-- `duration_minutes = ended_at_local - started_at_local`
+- `duration_minutes = ended_at_utc - started_at_utc`
 - `duration_minutes = day_minutes + night_minutes`
 - only non-deleted rows count toward totals
 - retrying a create with the same `request_id` and payload returns the existing
@@ -174,6 +182,7 @@ Examples:
 
 - `seed_ambiguous_duration`
 - `seed_possible_duplicate`
+- `seed_day_night_mismatch`
 
 Intrinsic warnings such as long duration and crossing midnight, and relational
 warnings such as overlaps and weekly overage, are derived from the current
@@ -189,9 +198,14 @@ Fields:
 - `id`
 - `driver_name`
 - `supervisor_name`
-- `started_at_local`
+- `started_at_utc`
+- `timezone_name`
+- `started_utc_offset_minutes`
 - `started_from` such as `web`
-- `status`: `active`, `completed`, or `cancelled`
+- `status`: `active`, `ending`, `completed`, or `cancelled`
+- `provisional_ended_at_utc` nullable
+- `provisional_ended_utc_offset_minutes` nullable
+- `end_request_id` nullable unique UUID
 - `completed_drive_id` nullable unique foreign key
 - `finalization_payload_hash` nullable
 - `finalized_at` nullable
@@ -199,27 +213,37 @@ Fields:
 
 Constraints:
 
-- a partial unique index permits only one `status = active` row
+- a partial unique index permits only one row whose status is `active` or
+  `ending`
 - a completed drive's `live_drive_id` and the live row's
   `completed_drive_id` provide a stable one-to-one identity
 - completed and cancelled live rows remain as audit history
 
-Ending a live drive is one `BEGIN IMMEDIATE` SQLite transaction:
+Tapping `End drive` is a durable transition performed in one `BEGIN IMMEDIATE`
+transaction:
 
 1. Read the live row by its stable UUID.
-2. If it is active, validate the end payload, insert exactly one completed
-   drive, and mark the live row completed with that drive ID and payload hash.
-3. If it is already completed with the same payload hash, return the existing
-   drive as a successful retry.
-4. If it is completed with different data, or cancelled, return a conflict.
-5. Commit both changes together.
+2. If it is active, record the server's current UTC instant and offset as the
+   provisional end, store the request UUID, and change status to `ending`.
+3. If it is already ending with the same request UUID, return the same
+   provisional end as a successful retry.
+4. If it is completed or cancelled, return that terminal state; conflicting
+   request data returns a conflict.
+5. Commit the transition before showing the completion form.
 
 If the process or host fails before commit, SQLite rolls back both changes. If
-it fails after commit but before the phone receives the response, retry returns
-the same completed drive. Cancel similarly changes `active` to `cancelled` in
-one transaction; repeated cancel is successful, while cancel after completion
-is a conflict. After restart, an active row remains visible on the dashboard
-with its original start time.
+it fails after commit but before the phone receives the response, a new session
+resumes the completion form with the same provisional end time.
+
+Finalizing an ending drive is a second `BEGIN IMMEDIATE` transaction. It
+validates metadata and any corrected end instant, inserts exactly one completed
+drive, and marks the live row completed with the drive ID and payload hash. A
+retry with the same payload returns that completed drive; different data
+returns a conflict. Cancel changes either `active` or `ending` to `cancelled` in
+one transaction. A deliberate `Resume drive` action may change `ending` back to
+`active` after confirmation and clears the provisional end. Repeated terminal
+actions are idempotent. After restart, an active or ending row remains visible
+with the appropriate timer or completion interface.
 
 ### 4. `import_batches`
 
@@ -246,12 +270,18 @@ Fields:
 
 - `id`
 - `import_batch_id`
+- `source_type`
+- `source_instance_id`, identifying the particular form, workbook, or seed file
 - `source_row_key`
 - `raw_text`
 - `parsed_payload_json`
 - `result_drive_id` nullable
 - `status`
 - `error_message` nullable
+
+Constraint:
+
+- unique `(source_type, source_instance_id, source_row_key)` across all batches
 
 ### 6. `configuration`
 
@@ -289,16 +319,26 @@ The database starts empty and is seeded from the two current record files.
 For the PDF:
 
 - Parse date/time as the drive start time.
-- Parse daytime or nighttime duration from the respective column.
-- Compute `ended_at_local = started_at_local + duration`.
+- Parse total duration from whichever source day/night column is populated, but
+  treat the source column classification as provenance rather than canonical
+  day/night truth.
+- Resolve the start to a UTC instant using `America/New_York`, compute the end
+  instant from duration, and recompute canonical day/night minutes from the
+  Apex solar rule.
+- Preserve the source day/night value in `import_rows`; attach a
+  `seed_day_night_mismatch` warning when it differs from the computed split.
 - Keep environment text as `road_type` when possible.
 - Store `Sean Ahern` as supervisor where present.
 
 For `log.txt`:
 
 - Accept both `start only + duration` and `start-end + duration` formats.
-- If a row includes start and end but no duration, compute from timestamps.
-- If a row includes duration but no end, compute end from start plus duration.
+- If a row includes start and end but no duration, resolve both to UTC and
+  compute duration.
+- If a row includes duration but no end, compute the UTC end from start plus
+  duration.
+- Recompute every canonical day/night split from the resulting UTC interval,
+  regardless of any day/night label in the source text.
 - If a row lacks enough information to compute duration, import it as a failed
   row in `import_rows` and require manual completion in the UI.
 
@@ -324,14 +364,21 @@ Night driving must be computed from entered timestamps, not manually toggled.
 
 ### Time basis
 
-- All times are local to `America/New_York`.
-- Store and compute against timezone-aware datetimes.
-- Daylight saving time versus standard time is handled by the timezone database,
-  not by custom logic.
+- Users enter and view local times in `America/New_York`.
+- Store canonical start and end as UTC instants, along with timezone name,
+  entered offsets, and the pinned tzdata version used to resolve them.
+- Use the pinned `tzdata` package rather than host-global timezone files so
+  calculations are reproducible after redeployment.
+- Reject local times that do not exist during the spring DST transition.
+- When a manually entered time is ambiguous during the fall transition, require
+  the user to choose the first or second occurrence and show the corresponding
+  timezone abbreviation and UTC offset.
+- Live-drive timestamps come from server UTC and are therefore unambiguous;
+  local values are display conversions.
 
 ### Sunrise/sunset rule
 
-For each drive date:
+For every local date intersected by a drive:
 
 - obtain sunrise and sunset for the local area
 - define daytime start as `sunrise - 15 minutes`
@@ -341,8 +388,11 @@ For each drive date:
 Implications:
 
 - A single drive can contribute to both day and night tallies.
-- The system should split each drive minute-by-minute or at least by boundary
-  intersections to compute exact day/night minutes.
+- Intersect the UTC drive interval with every relevant local solar boundary;
+  do not assign a cross-midnight drive entirely to its start date.
+- Store the calculation version, Apex coordinates, timezone, and tzdata version
+  on each drive so historical totals remain explainable after configuration or
+  dependency changes.
 
 ### Location assumption
 
@@ -370,8 +420,10 @@ are delegated to a standard source rather than custom formulas.
 
 Reject save when:
 
-- end time is before start time
+- the resolved end instant is before the resolved start instant
 - duration is zero or negative
+- a local timestamp falls in a nonexistent DST interval
+- an ambiguous fall-DST timestamp has no selected occurrence/offset
 - required fields are missing for a completed drive
 
 ### Soft warnings
@@ -392,7 +444,9 @@ Recommended behavior:
 
 - keep `total_minutes` as the sum of every valid drive
 - use `total_minutes` for the primary 60-hour progress gauge
-- compute each week's total without altering the recorded drives or grand total
+- intersect each drive's UTC interval with local calendar-week boundaries and
+  allocate minutes on each side; do not assign a cross-boundary drive wholly by
+  its start date
 - derive over-cap weeks from all current non-deleted drives whenever totals are
   read
 - after every create, import, or deletion, return the newly computed week total
@@ -410,8 +464,8 @@ moves or removes the warning correctly.
 The supplied form does not define the week boundary. Use a documented calendar
 week convention in version 1 and keep that convention configurable. The default
 is Sunday 12:00 a.m. through the following Sunday 12:00 a.m. in
-`America/New_York`, grouped by local drive start date. Before final DMV
-submission, any week over 10 hours should be reviewed manually.
+`America/New_York`. Before final DMV submission, any week over 10 hours should
+be reviewed manually.
 
 ## Web Interface
 
@@ -429,7 +483,7 @@ Shows:
 - numeric totals:
   `total`, `night total`, `remaining`
 - advisory card listing any weeks over the 10-hour cap and each overage amount
-- active live-drive banner if a drive is in progress
+- active timer or ending-drive completion banner when a live row is in progress
 - quick actions:
   `Start a drive`, `Add drive manually`, `View drives`, `Import`, `Export`
 
@@ -454,7 +508,7 @@ Capabilities:
 
 Displayed row summary:
 
-- date
+- start date
 - start-end
 - duration
 - day/night split
@@ -477,9 +531,11 @@ Form design:
 
 Fields:
 
-- date
+- start date
 - start time
+- end date, defaulting to the start date
 - end time
+- large `Ends next day` control that advances the end date by one day
 - supervisor name
 - supervisor DL number
 - supervisor DL state
@@ -496,6 +552,7 @@ On submit:
 
 - show computed duration
 - show computed day/night split
+- show both local dates when the drive crosses midnight
 - show warnings before final confirm if needed
 
 ### 4. Edit drive
@@ -503,6 +560,7 @@ On submit:
 The edit form reuses the large manual-entry controls and allows correction of:
 
 - date
+- end date or `Ends next day`
 - start time
 - end time
 - supervisor name
@@ -530,7 +588,7 @@ Entry point:
 
 At start:
 
-- record current local timestamp
+- record the current server UTC timestamp and local display offset
 - optionally capture default supervisor immediately
 - submit a browser-generated UUID so a repeated tap or retried request returns
   the same live drive
@@ -538,18 +596,20 @@ At start:
 During active drive:
 
 - dashboard shows elapsed time and `End drive` / `Cancel drive`
-- refreshing the page or restarting the service recovers the stored active
-  drive rather than starting a new timer
+- refreshing the page or restarting the service recovers the stored active or
+  ending drive rather than starting a new timer
 - the active drive is household/server state, not browser-session state; its
   ownership must not depend on a cookie, tab, IP address, Tailscale address, or
   in-memory process object
-- every authorized dashboard request queries SQLite for the single active row
-  and reconstructs elapsed time from `started_at_local`
+- every authorized dashboard request queries SQLite for the single active or
+  ending row; active elapsed time is reconstructed from `started_at_utc`, while
+  ending state resumes the completion form with its provisional end
 
 End flow:
 
 - tap `End drive`
-- record current local timestamp
+- durably record the current server UTC timestamp and transition to `ending`
+- render the completion form only after that transition commits
 - prompt only for remaining metadata:
   `road_type`, `weather`, `notes`, optional supervisor confirmation
 - show warnings and computed totals before final save
@@ -558,12 +618,15 @@ End flow:
 - default the end timestamp to the successful end request time, but allow it to
   be corrected before confirmation when reconnection or reauthentication
   delayed the request after the car stopped
+- if the browser or network disappears after the tap, a new session resumes
+  this same completion form and provisional end time
 
 Cancel flow:
 
 - tap `Cancel drive`
 - require confirmation
-- mark the active live drive cancelled without creating a completed drive
+- mark the live-drive row cancelled without creating a completed drive
+- permit cancellation from either active or ending state
 - repeat submissions return the already-cancelled result
 
 Required reconnect scenario:
@@ -577,7 +640,8 @@ Required reconnect scenario:
    controls.
 
 The same outcome is required if the web service or Rocky host restarts while
-the phone is disconnected.
+the phone is disconnected. A parallel test ends the drive before disconnection
+and must recover the ending-state completion form and provisional end time.
 
 ### 6. Import/export pages
 
@@ -604,11 +668,20 @@ Recommended columns:
 - `supervisor_name`
 - `supervisor_dl_number`
 - `supervisor_dl_state`
+- `started_at_utc`
+- `ended_at_utc`
 - `started_at_local`
 - `ended_at_local`
+- `timezone_name`
+- `started_utc_offset_minutes`
+- `ended_utc_offset_minutes`
 - `duration_minutes`
 - `day_minutes`
 - `night_minutes`
+- `solar_calculation_version`
+- `solar_latitude`
+- `solar_longitude`
+- `tzdata_version`
 - `road_type`
 - `weather`
 - `notes`
@@ -619,10 +692,15 @@ Rules:
 
 - export in UTF-8
 - use ISO-like local datetime strings with timezone offset
+- use RFC 3339 UTC strings for canonical start/end instants; local strings are
+  human-readable redundant values
 - export only non-deleted completed drives
 - preserve each drive's stable UUID and original provenance
 - validate `format_version`, headers, every row, and all duplicate IDs before
   making any database change
+- recompute duration and day/night minutes from the canonical UTC interval and
+  recorded calculation context; reject internal inconsistencies rather than
+  trusting redundant CSV totals
 - calculate a SHA-256 hash for the exact uploaded file and store it as the
   unique `import_batches.content_sha256`
 - perform the entire import and its audit rows in one transaction
@@ -640,10 +718,10 @@ restore workflow below.
 ## Full-State Archives
 
 A full-state archive is the disaster-recovery backup. It contains a consistent
-SQLite snapshot with completed and soft-deleted drives, source warnings, active
-and finalized live-drive rows, configuration, import raw snapshots and audit
-rows, schema history, and application audit events. Credentials remain external
-and are documented separately.
+SQLite snapshot with completed and soft-deleted drives, source warnings, every
+live-drive lifecycle state, configuration, import raw snapshots and audit rows,
+schema history, and application audit events. Credentials remain external and
+are documented separately.
 
 Storage defaults:
 
@@ -651,6 +729,8 @@ Storage defaults:
 - live database:
   `/home/ahern/.local/state/driving-log/driving-log.sqlite3`
 - archive directory: `/home/ahern/.local/state/driving-log/archives`
+- staged restore directory:
+  `/home/ahern/.local/state/driving-log/restore-requests`
 - directory mode `0700`; database and archives mode `0600`
 
 The user-level systemd units express `/home/ahern` with the `%h` specifier, but
@@ -672,6 +752,46 @@ Archive creation:
 `driving-log-archive.timer` creates and verifies one archive daily. Retain the
 most recent 14 daily archives and 8 weekly archives. A verified pre-migration
 archive is mandatory and is not removed by ordinary daily retention.
+
+### External replication
+
+Local archives protect against database corruption but not loss of Rocky's
+disk. Configure `DRIVING_LOG_EXTERNAL_ARCHIVE_DIR` to a mounted external disk,
+NAS, or other destination outside the live database filesystem.
+
+After local verification, the archive service copies the bundle to a temporary
+name at that destination, `fsync`s it, atomically renames it, and independently
+verifies its manifest hash and SQLite `quick_check`. Retain at least 8 verified
+weekly external archives. Failed or unavailable replication never deletes a
+previous external archive and produces a dashboard and `doctor` warning.
+
+`archive create --out PATH` supports an explicit one-off external destination,
+and the web download provides a manual off-host copy. Production readiness must
+show either a verified configured external archive or an explicitly
+acknowledged warning that disaster recovery is limited to the Rocky disk.
+
+### Restore orchestration
+
+CLI restoration runs directly while the web service is stopped. Web restoration
+uses an external user-systemd helper so the request is not responsible for
+stopping and restarting its own process:
+
+1. The authenticated web process uploads an archive into a UUID-named restore
+   request directory and verifies it without changing live state.
+2. After recent reauthentication and explicit confirmation, it atomically
+   writes an HMAC-signed request manifest containing the operation ID, expected
+   archive hash, and `not_before` time. The signing key is in the mode-`0600`
+   service environment file, not the database or archive.
+3. It starts `driving-log-restore@OPERATION_ID.service` and returns HTTP 202 with
+   the operation ID. The signed request manifest contains a short `not_before`
+   time so the helper cannot stop the web service until the response has had
+   time to flush.
+4. The helper re-verifies the staged archive and request manifest, performs the
+   restore procedure below, restarts the web service, and atomically writes a
+   result file outside the restored database.
+5. After reconnect, the browser reads the result by operation ID. The same
+   result is available through `./driving-log archive restore-status ID` if the
+   web service could not restart.
 
 Restore procedure:
 
@@ -708,10 +828,12 @@ Recommended command surface:
 - `./driving-log seed`
 - `./driving-log csv export --out driving-log.csv`
 - `./driving-log csv import --in driving-log.csv`
-- `./driving-log archive create`
+- `./driving-log archive create [--out PATH]`
 - `./driving-log archive list`
+- `./driving-log archive replicate`
 - `./driving-log archive verify [ARCHIVE]`
 - `./driving-log archive restore ARCHIVE --confirm`
+- `./driving-log archive restore-status OPERATION_ID`
 
 Use a small shell entrypoint plus the standard-library `argparse` module. The
 commands are thin wrappers around the application's real service, import, and
@@ -723,9 +845,11 @@ archive logic so behavior stays consistent between CLI and web.
 - configured and resolved database/archive paths and file permissions
 - effective SQLite journal, synchronous, foreign-key, and busy-timeout settings
 - `PRAGMA quick_check` result
-- active live-drive ID and age, without private supervisor details
+- active or ending live-drive ID, state, age, and provisional end presence,
+  without private supervisor details
 - incomplete or failed import batches
 - newest full archive age and latest verification result
+- newest external archive age, destination, and verification result
 - filesystem free space
 - user-service state and recent restart count
 - local HTTP liveness/readiness independently from Tailscale Serve status
@@ -760,6 +884,7 @@ Recommended service units:
 - `driving-log-web.service`
 - `driving-log-archive.service`
 - `driving-log-archive.timer`
+- `driving-log-restore@.service`
 - optional `driving-log-import.timer` later for scheduled form ingestion
 
 ### SQLite durability
@@ -832,6 +957,7 @@ Design now so it plugs in later without changing the core model.
 Define an importer abstraction now:
 
 - input: raw row payload
+- input identity: source type, stable source instance ID, and stable row key
 - output: normalized drive candidate plus warnings/errors
 
 That same interface can be used for:
@@ -845,8 +971,9 @@ That same interface can be used for:
 
 The future form should collect:
 
-- date
+- start date
 - start time
+- end date or an `Ends next day` answer
 - end time
 - supervisor name
 - road type
@@ -854,6 +981,24 @@ The future form should collect:
 - notes
 
 Night/day should still be computed by the app.
+
+### Idempotency and updates
+
+Use the Microsoft Form response ID as `source_row_key`; never use spreadsheet
+row number because sorting and row insertion can change it. Store a stable form
+or workbook ID as `source_instance_id`.
+
+Each scheduled acquisition may read the whole table. In one transaction:
+
+- a previously unseen source key creates one drive and import row
+- an existing key with identical normalized content is a no-op
+- an existing key with changed content is reported as a conflict requiring
+  explicit review; it never creates another drive or silently overwrites edits
+- the batch records inserted, unchanged, conflicted, and invalid row counts
+
+The whole-snapshot SHA-256 makes retry of an identical acquisition a no-op; the
+per-row unique source identity makes a later snapshot containing old plus new
+responses safe. Interrupted batches roll back and can be retried.
 
 ### Scraping versus API
 
@@ -864,13 +1009,31 @@ storage logic.
 
 ## Security / Access
 
-Primary audience is the household, so keep the first version simple.
+Primary audience is the household, but the application can mutate an
+authoritative record and expose supervisor license numbers. Network membership
+alone is not sufficient authorization.
 
-Recommended first version:
+Required controls:
 
-- bind to localhost only
-- rely on Tailscale exposure for remote access
-- optional shared secret or basic auth if the forwarded endpoint is broader
+- bind only to localhost and expose only through Tailscale Serve over HTTPS
+- require an application login using a high-entropy household secret stored in
+  a mode-`0600` environment file outside the repo and database
+- rate-limit failed login attempts
+- issue `Secure`, `HttpOnly`, `SameSite=Strict` session cookies
+- generate a per-session CSRF token and validate it on every state-changing
+  request
+- reject mutation requests whose `Origin` and `Host` do not match the configured
+  public Tailscale URL
+- use POST for mutations and never mutate state from GET requests
+- require recent reauthentication for archive restore
+- return archive and CSV downloads with `Cache-Control: no-store` and attachment
+  disposition
+- never place credentials, session tokens, CSRF tokens, or supervisor license
+  numbers in URLs or logs
+
+Opening a new browser session may require application login again, but after
+authentication the active or ending drive is recovered from SQLite; session
+identity never owns the drive.
 
 For the Microsoft-form ingestion path, credentials should live outside the repo
 in environment variables or a local config file excluded from version control.
@@ -901,15 +1064,20 @@ Use deterministic clocks and fixed Apex coordinates. Cover:
 - duration validation at zero, negative, 5 hours, and just over 5 hours
 - sunrise minus 15 minutes and sunset plus 15 minutes boundary behavior
 - drives entirely in day or night and drives split across either boundary
-- spring DST gaps and fall DST folds in `America/New_York`
+- spring DST gaps, both fall-DST fold occurrences, and UTC round trips in
+  `America/New_York`
 - standard-time and daylight-time dates
-- midnight crossing and end-before-start behavior
+- midnight crossing, explicit next-day input, end-before-start behavior, and
+  splitting at local date and calendar-week boundaries
 - overlap creation and removal after soft deletion
 - calendar-week boundaries, exactly 600 minutes, first minute of overage,
   multiple over-cap drives, historical import, and deletion-driven recomputation
 - CSV format versions, duplicate file hashes, identical UUID retries,
   conflicting UUIDs, and all-or-nothing row validation
-- seed parsing ambiguities and duplicate candidates
+- seed parsing ambiguities, source/computed day-night mismatches, and duplicate
+  candidates
+- repeated Microsoft snapshots containing old plus new rows, identical-row
+  no-ops, and changed-row conflicts
 
 Astronomy tests use known expected Apex sunrise/sunset fixtures with a documented
 tolerance, while business-boundary tests inject exact sunrise/sunset values so
@@ -922,19 +1090,24 @@ Run against real temporary SQLite files with production pragmas. Cover:
 - schema creation and every migration path from each supported schema version
 - failed migration rollback and refusal to start on newer or damaged schemas
 - WAL recovery after killing a subprocess during manual entry, deletion, live
-  start, live end, cancel, CSV import, archive creation, and migration
+  start, active-to-ending transition, ending-state finalization, cancel, CSV
+  import, archive creation, and migration
 - live finalization before-commit and after-commit failure points, proving retry
   creates exactly one completed drive
+- ending-state recovery after browser, process, and host restart
 - duplicate manual and live requests with same and conflicting idempotency data
 - edit retries after response loss and conflicting edits from two browser
   sessions
 - interrupted CSV import rollback and safe retry
 - `quick_check` startup failure and read-only/unready behavior
 - archive hash/integrity rejection
-- archive retention behavior
+- local and external archive retention, interrupted replication, and external
+  hash/integrity rejection
 - full restore equality for every authoritative table, including soft-deleted
   rows, configuration, raw imports, audits, and an active live drive
 - quarantine preservation and rollback when post-restore readiness fails
+- web restore staging, manifest HMAC and `not_before` enforcement, helper
+  handoff, result-file recovery, and failed web-service restart
 
 Tests must use subprocess termination and reopen the database rather than merely
 raising an exception inside one connection.
@@ -948,11 +1121,16 @@ Playwright WebKit runs at representative iPhone viewport sizes and verifies:
 - manual entry validation and warning acknowledgement
 - drive listing, details, editing, concurrent-edit conflict, deletion, CSV
   download/upload, and archive controls
-- start, elapsed display, end, cancel, double-tap, and refresh behavior
+- login, cookie flags, CSRF rejection, Origin/Host rejection, and restore
+  reauthentication
+- start, elapsed display, durable ending state, resume, finalization, cancel,
+  double-tap, and refresh behavior
 - end-request retry after a response is lost
 - active-drive recovery in a fresh browser context with no cookies or local
   storage
 - active-drive recovery after restarting the service between page loads
+- ending-state completion recovery in a fresh browser context and after service
+  restart
 - offline/Tailscale-unavailable presentation without losing browser form state
 - end-time correction after reconnection delay
 
@@ -969,7 +1147,9 @@ Required before deployment:
 - `git diff --check` passes
 - a fresh bootstrap works from the committed hash-locked dependencies
 - seed import totals and warnings are manually reconciled
-- `doctor` reports healthy local service, database, archive, and Tailscale layers
+- `doctor` reports healthy local service, database, local archive, external
+  archive, and Tailscale layers, or the external-backup limitation is explicitly
+  acknowledged
 - a full archive is created, verified, restored into a disposable state
   directory, and compared with the source database
 - start/stop/restart and reboot persistence are smoke-tested
@@ -999,14 +1179,17 @@ These should be handled explicitly during implementation:
 - manual entry
 - drive list, edit, and delete
 - CSV export/import
-- full-state archive create/verify/restore and automated retention
+- full-state archive create/verify/restore, external replication, and automated
+  retention
 - day/night computation
 - warnings engine
+- application authentication, session security, and CSRF protection
 - unit and SQLite recovery tests
 
 ### Phase 2
 
 - live-drive start/end/cancel
+- durable ending-state recovery and resume
 - user-level `systemd` service helpers
 - Tailscale-forwarded deployment docs
 - operational health, doctor, and structured logging
@@ -1022,9 +1205,15 @@ These should be handled explicitly during implementation:
 
 - Sunrise/sunset location: Apex, North Carolina.
 - Timezone: `America/New_York`.
+- Canonical time storage: UTC instants with local timezone, offset, and pinned
+  tzdata context.
 - Calendar week: Sunday through Saturday in local time; configurable if DMV
   provides a different interpretation.
 - Supervisor DL number and state: not yet available; keep nullable until
   supplied and warn before DMV-facing export.
 - Dashboard: show all recorded time as progress toward 60 hours. Flag any week
   over 10 hours and show its overage without reducing the displayed total.
+- Web access: Tailscale HTTPS plus mandatory application authentication and
+  CSRF protection.
+- External archive destination: not yet selected; deployment must configure one
+  or explicitly acknowledge same-disk-only disaster recovery.
