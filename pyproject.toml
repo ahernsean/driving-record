@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools==80.10.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "driving-log"
+version = "0.1.0"
+description = "A private, solar-aware supervised driving record"
+requires-python = "==3.13.*"
+dependencies = [
+  "astral==3.2",
+  "fastapi==0.139.2",
+  "jinja2==3.1.6",
+  "python-multipart==0.0.32",
+  "tzdata==2026.3",
+  "uvicorn==0.51.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx==0.28.1",
+  "mypy==1.19.1",
+  "playwright==1.61.0",
+  "pytest==9.1.1",
+  "pytest-cov==7.0.0",
+  "ruff==0.15.7",
+]
+
+[project.scripts]
+driving-log = "driving_log.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["driving_log*"]
+
+[tool.setuptools.package-data]
+driving_log = ["templates/*.html", "static/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["driving_log"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+
+[tool.coverage.run]
+branch = true
+source = ["driving_log"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
