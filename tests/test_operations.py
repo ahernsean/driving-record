@@ -92,6 +92,7 @@ class OperationTests(unittest.TestCase):
             contents = environment.read_text()
             self.assertIn("DRIVING_LOG_HOST=127.0.0.1", contents)
             self.assertIn("DRIVING_LOG_PORT=8766", contents)
+            self.assertIn("DRIVING_LOG_PUBLIC_SCHEME=http", contents)
             self.assertIn("DRIVING_LOG_FORM_SECRET=", contents)
             self.assertIn(f"DRIVING_LOG_EXTERNAL_ARCHIVE_DIR={home / 'external'}", contents)
             unit_dir = Path(result["unit_directory"])
@@ -112,7 +113,7 @@ class OperationTests(unittest.TestCase):
             "active",
         )
 
-        tailscale = CompletedProcess(["tailscale"], 0, '{"TCP":{"8443":{"HTTPS":true}}}', "")
+        tailscale = CompletedProcess(["tailscale"], 0, '{"TCP":{"8443":{"HTTP":true}}}', "")
         with mock.patch("driving_log.operations.subprocess.run", return_value=tailscale):
             self.assertTrue(tailscale_snapshot()["available"])
         failure = CompletedProcess(["tailscale"], 1, "", "daemon unavailable")

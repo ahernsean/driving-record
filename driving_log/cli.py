@@ -42,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_parser(command)
     install = sub.add_parser("install")
     install.add_argument("--public-host", required=True)
+    install.add_argument("--public-scheme", choices=("http", "https"), default="http")
     install.add_argument("--external-archive-dir", type=Path)
     live = sub.add_parser("live")
     live.add_argument("action", choices=("status",))
@@ -147,10 +148,11 @@ def doctor(settings: Settings) -> dict[str, object]:
         configuration = tailscale.get("configuration", {})
         tcp = configuration.get("TCP", {}) if isinstance(configuration, dict) else {}
         web = configuration.get("Web", {}) if isinstance(configuration, dict) else {}
-        https_ok = (
+        protocol_key = settings.public_scheme.upper()
+        protocol_ok = (
             isinstance(tcp, dict)
             and isinstance(tcp.get("8443"), dict)
-            and bool(tcp["8443"].get("HTTPS"))
+            and bool(tcp["8443"].get(protocol_key))
         )
         driving_handler = web.get(settings.public_host, {}) if isinstance(web, dict) else {}
         wordle_handler = (
@@ -165,14 +167,14 @@ def doctor(settings: Settings) -> dict[str, object]:
         result["deployment_checks"] = {
             "web_service_active": service_ok,
             "archive_verified": archive_ok,
-            "tailscale_https_8443": https_ok and driving_ok,
+            "tailscale_http_8443": protocol_ok and driving_ok,
             "wordle_http_80_preserved": wordle_ok,
         }
         result["ready"] = bool(
             result.get("ready")
             and service_ok
             and archive_ok
-            and https_ok
+            and protocol_ok
             and driving_ok
             and wordle_ok
         )
@@ -186,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         install_result = install_user_units(
             Path(__file__).parent.parent,
             public_host=args.public_host,
+            public_scheme=args.public_scheme,
             external_archive_dir=args.external_archive_dir,
         )
         print(json.dumps(install_result, indent=2, sort_keys=True))

@@ -7,10 +7,10 @@ Install the checked-out stack tip:
 
 ```sh
 ./driving-log bootstrap
-./driving-log install --public-host HOSTNAME:8443
+./driving-log install --public-host HOSTNAME:8443 --public-scheme http
 loginctl enable-linger "$USER"
 ./driving-log start
-tailscale serve --bg --https=8443 http://127.0.0.1:8766
+tailscale serve --bg --http=8443 http://127.0.0.1:8766
 ```
 
 Before changing Serve, save `tailscale serve status --json` and verify the

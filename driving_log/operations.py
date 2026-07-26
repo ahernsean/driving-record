@@ -32,7 +32,11 @@ def run_systemctl(action: str, *units: str, check: bool = True) -> subprocess.Co
 
 
 def install_user_units(
-    repo_root: Path, *, public_host: str, external_archive_dir: Path | None = None
+    repo_root: Path,
+    *,
+    public_host: str,
+    public_scheme: str = "http",
+    external_archive_dir: Path | None = None,
 ) -> dict[str, str]:
     config_dir = Path.home() / ".config" / "driving-log"
     unit_dir = Path.home() / ".config" / "systemd" / "user"
@@ -58,6 +62,7 @@ def install_user_units(
         "DRIVING_LOG_HOST": "127.0.0.1",
         "DRIVING_LOG_PORT": "8766",
         "DRIVING_LOG_PUBLIC_HOST": public_host,
+        "DRIVING_LOG_PUBLIC_SCHEME": public_scheme,
         "DRIVING_LOG_FORM_SECRET": secret,
     }
     selected_external = (
