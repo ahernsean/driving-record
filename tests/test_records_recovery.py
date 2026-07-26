@@ -26,7 +26,6 @@ from driving_log.csv_backup import CSV_COLUMNS, export_csv, import_csv
 from driving_log.db import Database
 from driving_log.records import ConflictError, DriveInput, RecordService
 from driving_log.seed import parse_log_text, parse_pdf_text
-from driving_log.solar import NonexistentLocalTimeError
 
 
 class ServiceCase(unittest.TestCase):
@@ -62,6 +61,16 @@ class ServiceCase(unittest.TestCase):
 
 
 class RecordTests(ServiceCase):
+    def test_rejects_fractional_timestamp_even_with_whole_minute_duration(self) -> None:
+        start = datetime(2026, 7, 20, 16, 0, 0, 123456, tzinfo=UTC)
+        with self.assertRaisesRegex(ValueError, "minute-aligned"):
+            self.service.create(
+                self.drive(
+                    started_at_utc=start,
+                    ended_at_utc=start + timedelta(minutes=30),
+                )
+            )
+
     def test_create_retry_conflict_edit_and_delete(self) -> None:
         request = str(uuid.uuid4())
         created = self.service.create(self.drive(), request_id=request)
@@ -253,7 +262,7 @@ class ArchiveTests(ServiceCase):
         archive = create_archive(self.database, Path(self.temporary.name) / "archives")
         with (
             application_lock(self.path.parent, exclusive=False),
-            self.assertRaises(BlockingIOError),
+            self.assertRaisesRegex(RuntimeError, "stop the web service first"),
         ):
             restore_archive(self.path, archive, confirm=True)
 
@@ -297,6 +306,7 @@ class SeedParserTests(unittest.TestCase):
         rows = parse_pdf_text(text, "seed.pdf")
         self.assertEqual(len(rows), 2)
         self.assertTrue(all(row.warnings for row in rows))
+        self.assertTrue(all(row.drive.road_type == "local" for row in rows))
         self.assertNotEqual(rows[0].drive_id, rows[1].drive_id)
 
     def test_text_parser_understands_ampm_and_infers_final_duration(self) -> None:
@@ -315,10 +325,18 @@ class SeedParserTests(unittest.TestCase):
         )
         self.assertEqual(rows[1].warnings[0][0], "seed_ambiguous_duration")
 
-    def test_seed_parser_rejects_nonexistent_dst_time(self) -> None:
+    def test_seed_parser_normalizes_and_flags_nonexistent_dst_time(self) -> None:
         text = "* 2026-03-08 2:30 AM: 10 minutes, local roads"
-        with self.assertRaises(NonexistentLocalTimeError):
-            parse_log_text(text, "log.txt")
+        row = parse_log_text(text, "log.txt")[0]
+        local = row.drive.started_at_utc.astimezone(ZoneInfo("America/New_York"))
+        self.assertEqual((local.hour, local.minute), (3, 30))
+        self.assertEqual(row.warnings[0][0], "seed_nonexistent_local_time")
+
+    def test_seed_parser_flags_first_fold_and_keeps_unknown_road_type(self) -> None:
+        text = "* 2026-11-01 1:30 AM: 10 minutes, clear weather"
+        row = parse_log_text(text, "log.txt")[0]
+        self.assertEqual(row.drive.road_type, "unknown")
+        self.assertEqual(row.warnings[0][0], "seed_ambiguous_local_time")
 
 
 if __name__ == "__main__":

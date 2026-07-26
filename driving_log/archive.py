@@ -45,7 +45,14 @@ def application_lock(state_dir: Path, *, exclusive: bool) -> Iterator[None]:
     lock_path = state_dir / ".application.lock"
     with lock_path.open("a+b") as lock:
         mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-        fcntl.flock(lock.fileno(), mode | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock.fileno(), mode | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            action = "restore" if exclusive else "start the application"
+            raise RuntimeError(
+                f"cannot {action} while driving-log-web.service is running; "
+                "stop the web service first"
+            ) from exc
         try:
             yield
         finally:

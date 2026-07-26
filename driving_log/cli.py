@@ -65,7 +65,7 @@ def doctor(settings: Settings) -> dict[str, object]:
         if settings.state_dir.exists()
         else None,
     }
-    database = Database(settings.database_path)
+    database = Database(settings.database_path, settings.archive_dir)
     try:
         database.initialize()
         connection = database.connect()

@@ -27,7 +27,12 @@ def validate_interval(
     seconds = (ended_at_utc - started_at_utc).total_seconds()
     if seconds <= 0:
         raise ValueError("drive duration must be positive")
-    if seconds % 60:
+    if (
+        started_at_utc.second
+        or started_at_utc.microsecond
+        or ended_at_utc.second
+        or ended_at_utc.microsecond
+    ):
         raise ValueError("drive timestamps must be minute-aligned")
     duration = int(seconds // 60)
     day, night = split_day_night(started_at_utc, ended_at_utc, timezone_name=timezone_name)

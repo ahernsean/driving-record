@@ -14,7 +14,7 @@ from driving_log.logging_config import configure_logging
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     selected = settings or Settings.from_env()
-    database = Database(selected.database_path)
+    database = Database(selected.database_path, selected.archive_dir)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

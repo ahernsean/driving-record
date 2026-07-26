@@ -30,8 +30,9 @@ def utc_now_text() -> str:
 
 
 class Database:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, archive_dir: Path | None = None):
         self.path = path
+        self.archive_dir = archive_dir or path.parent / "archives"
         self.ready = False
         self.read_only_reason: str | None = None
 
@@ -86,10 +87,8 @@ class Database:
                 stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
                 create_archive(
                     self,
-                    self.path.parent / "archives",
-                    self.path.parent
-                    / "archives"
-                    / f"driving-log-pre-migration-v{current}-{stamp}.tar.gz",
+                    self.archive_dir,
+                    self.archive_dir / f"driving-log-pre-migration-v{current}-{stamp}.tar.gz",
                 )
                 connection = self.connect()
             self._apply_migrations(connection)

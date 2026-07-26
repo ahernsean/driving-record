@@ -11,8 +11,8 @@ from typing import cast
 
 from driving_log.config import APEX_LATITUDE, APEX_LONGITUDE, DEFAULT_TIMEZONE
 from driving_log.db import Database, utc_now_text
-from driving_log.solar import SOLAR_CALCULATION_VERSION, split_day_night, week_segments
-from driving_log.validation import validate_road_type
+from driving_log.solar import SOLAR_CALCULATION_VERSION, week_segments
+from driving_log.validation import validate_interval, validate_road_type
 
 
 class ConflictError(RuntimeError):
@@ -69,46 +69,46 @@ def _drive_values(
     value: DriveInput,
     *,
     live_drive_id: str | None = None,
-) -> tuple[object, ...]:
+) -> dict[str, object]:
     payload = _canonical_payload(value)
     start = value.started_at_utc.astimezone(UTC)
     end = value.ended_at_utc.astimezone(UTC)
-    seconds = (end - start).total_seconds()
-    if seconds <= 0 or seconds % 60:
-        raise ValueError("drive must have a positive, whole-minute duration")
-    duration = int(seconds // 60)
-    day, night = split_day_night(start, end, timezone_name=value.timezone_name)
+    interval = validate_interval(start, end, timezone_name=value.timezone_name)
     now = utc_now_text()
-    return (
-        drive_id,
-        request_id,
-        request_payload_hash,
-        live_drive_id,
-        str(payload["driver_name"]).strip(),
-        value.supervisor_name.strip() if value.supervisor_name else None,
-        value.supervisor_dl_number.strip() if value.supervisor_dl_number else None,
-        value.supervisor_dl_state.strip().upper() if value.supervisor_dl_state else None,
-        start.isoformat().replace("+00:00", "Z"),
-        end.isoformat().replace("+00:00", "Z"),
-        value.timezone_name,
-        _offset_minutes(start, value.timezone_name),
-        _offset_minutes(end, value.timezone_name),
-        duration,
-        day,
-        night,
-        SOLAR_CALCULATION_VERSION,
-        APEX_LATITUDE,
-        APEX_LONGITUDE,
-        package_version("tzdata"),
-        payload["road_type"],
-        value.weather.strip(),
-        value.notes.strip(),
-        value.source,
-        value.source_reference,
-        value.import_batch_id,
-        now,
-        now,
-    )
+    return {
+        "id": drive_id,
+        "request_id": request_id,
+        "request_payload_hash": request_payload_hash,
+        "live_drive_id": live_drive_id,
+        "driver_name": str(payload["driver_name"]).strip(),
+        "supervisor_name": (value.supervisor_name.strip() if value.supervisor_name else None),
+        "supervisor_dl_number": (
+            value.supervisor_dl_number.strip() if value.supervisor_dl_number else None
+        ),
+        "supervisor_dl_state": (
+            value.supervisor_dl_state.strip().upper() if value.supervisor_dl_state else None
+        ),
+        "started_at_utc": start.isoformat().replace("+00:00", "Z"),
+        "ended_at_utc": end.isoformat().replace("+00:00", "Z"),
+        "timezone_name": value.timezone_name,
+        "started_utc_offset_minutes": _offset_minutes(start, value.timezone_name),
+        "ended_utc_offset_minutes": _offset_minutes(end, value.timezone_name),
+        "duration_minutes": interval.duration_minutes,
+        "day_minutes": interval.day_minutes,
+        "night_minutes": interval.night_minutes,
+        "solar_calculation_version": SOLAR_CALCULATION_VERSION,
+        "solar_latitude": APEX_LATITUDE,
+        "solar_longitude": APEX_LONGITUDE,
+        "tzdata_version": package_version("tzdata"),
+        "road_type": payload["road_type"],
+        "weather": value.weather.strip(),
+        "notes": value.notes.strip(),
+        "source": value.source,
+        "source_reference": value.source_reference,
+        "import_batch_id": value.import_batch_id,
+        "created_at": now,
+        "updated_at": now,
+    }
 
 
 INSERT_DRIVE_SQL = """
@@ -118,7 +118,15 @@ INSERT INTO drives (
  started_utc_offset_minutes, ended_utc_offset_minutes, duration_minutes, day_minutes,
  night_minutes, solar_calculation_version, solar_latitude, solar_longitude, tzdata_version,
  road_type, weather, notes, source, source_reference, import_batch_id, created_at, updated_at
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) VALUES (
+ :id, :request_id, :request_payload_hash, :live_drive_id, :driver_name,
+ :supervisor_name, :supervisor_dl_number, :supervisor_dl_state, :started_at_utc,
+ :ended_at_utc, :timezone_name, :started_utc_offset_minutes,
+ :ended_utc_offset_minutes, :duration_minutes, :day_minutes, :night_minutes,
+ :solar_calculation_version, :solar_latitude, :solar_longitude, :tzdata_version,
+ :road_type, :weather, :notes, :source, :source_reference, :import_batch_id,
+ :created_at, :updated_at
+)
 """
 
 
@@ -215,21 +223,23 @@ class RecordService:
             connection.execute(
                 """
                 UPDATE drives SET
-                  driver_name=?, supervisor_name=?, supervisor_dl_number=?,
-                  supervisor_dl_state=?, started_at_utc=?, ended_at_utc=?, timezone_name=?,
-                  started_utc_offset_minutes=?, ended_utc_offset_minutes=?,
-                  duration_minutes=?, day_minutes=?, night_minutes=?,
-                  solar_calculation_version=?, solar_latitude=?, solar_longitude=?,
-                  tzdata_version=?, road_type=?, weather=?, notes=?, updated_at=?,
+                  driver_name=:driver_name, supervisor_name=:supervisor_name,
+                  supervisor_dl_number=:supervisor_dl_number,
+                  supervisor_dl_state=:supervisor_dl_state,
+                  started_at_utc=:started_at_utc, ended_at_utc=:ended_at_utc,
+                  timezone_name=:timezone_name,
+                  started_utc_offset_minutes=:started_utc_offset_minutes,
+                  ended_utc_offset_minutes=:ended_utc_offset_minutes,
+                  duration_minutes=:duration_minutes, day_minutes=:day_minutes,
+                  night_minutes=:night_minutes,
+                  solar_calculation_version=:solar_calculation_version,
+                  solar_latitude=:solar_latitude, solar_longitude=:solar_longitude,
+                  tzdata_version=:tzdata_version, road_type=:road_type,
+                  weather=:weather, notes=:notes, updated_at=:updated_at,
                   version=version+1
-                WHERE id=? AND version=?
+                WHERE id=:id AND version=:expected_version
                 """,
-                (
-                    *values[4:23],
-                    values[27],
-                    drive_id,
-                    expected_version,
-                ),
+                {**values, "expected_version": expected_version},
             )
             self.database.audit(
                 connection,
@@ -303,7 +313,7 @@ class RecordService:
         connection: sqlite3.Connection | None = None,
     ) -> sqlite3.Row:
         owned = connection is None
-        selected = connection or self.database.connect()
+        selected = connection or self.database.connect_readonly()
         try:
             sql = "SELECT * FROM drives WHERE id=?"
             if not include_deleted:
@@ -317,7 +327,7 @@ class RecordService:
                 selected.close()
 
     def list_drives(self, *, include_deleted: bool = False) -> list[sqlite3.Row]:
-        connection = self.database.connect()
+        connection = self.database.connect_readonly()
         sql = "SELECT * FROM drives"
         if not include_deleted:
             sql += " WHERE deleted_at IS NULL"
@@ -327,7 +337,7 @@ class RecordService:
         return rows
 
     def totals(self) -> dict[str, object]:
-        connection = self.database.connect()
+        connection = self.database.connect_readonly()
         totals = connection.execute(
             """
             SELECT COALESCE(SUM(duration_minutes),0), COALESCE(SUM(day_minutes),0),
@@ -377,7 +387,8 @@ class RecordService:
         }
 
     def warnings_for(self, drive_id: str) -> list[dict[str, str]]:
-        drive = self.get(drive_id)
+        connection = self.database.connect_readonly()
+        drive = self.get(drive_id, connection=connection)
         warnings: list[dict[str, str]] = []
         if drive["duration_minutes"] > 300:
             warnings.append({"code": "long_drive", "message": "Drive exceeds five hours"})
@@ -388,7 +399,6 @@ class RecordService:
         end = datetime.fromisoformat(drive["ended_at_utc"].replace("Z", "+00:00"))
         if start.astimezone(zone).date() != end.astimezone(zone).date():
             warnings.append({"code": "crosses_midnight", "message": "Drive crosses midnight"})
-        connection = self.database.connect()
         overlaps = connection.execute(
             """
             SELECT id FROM drives WHERE id != ? AND deleted_at IS NULL
