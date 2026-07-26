@@ -10,6 +10,7 @@ from driving_log.archive import application_lock
 from driving_log.config import Settings
 from driving_log.db import Database
 from driving_log.logging_config import configure_logging
+from driving_log.web import register_web
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -41,6 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=status)
         return {"status": "ready", **status}
 
+    register_web(app, selected, database)
     return app
 
 

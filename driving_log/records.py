@@ -140,15 +140,20 @@ class RecordService:
         *,
         request_id: str | None = None,
         drive_id: str | None = None,
+        live_drive_id: str | None = None,
         connection: sqlite3.Connection | None = None,
     ) -> sqlite3.Row:
         canonical = _canonical_payload(value)
         digest = payload_hash(canonical)
         selected_id = drive_id or str(uuid.uuid4())
         if connection is not None:
-            return self._create_in_transaction(connection, value, selected_id, request_id, digest)
+            return self._create_in_transaction(
+                connection, value, selected_id, request_id, digest, live_drive_id
+            )
         with self.database.transaction() as transaction:
-            return self._create_in_transaction(transaction, value, selected_id, request_id, digest)
+            return self._create_in_transaction(
+                transaction, value, selected_id, request_id, digest, live_drive_id
+            )
 
     def _create_in_transaction(
         self,
@@ -157,6 +162,7 @@ class RecordService:
         drive_id: str,
         request_id: str | None,
         digest: str,
+        live_drive_id: str | None = None,
     ) -> sqlite3.Row:
         if request_id:
             existing = connection.execute(
@@ -168,7 +174,7 @@ class RecordService:
                 return cast(sqlite3.Row, existing)
         connection.execute(
             INSERT_DRIVE_SQL,
-            _drive_values(drive_id, request_id, digest, value),
+            _drive_values(drive_id, request_id, digest, value, live_drive_id=live_drive_id),
         )
         self.database.audit(
             connection,

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="{{ theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="{{ '#101b2d' if theme == 'dark' else '#f4f8ff' }}">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script>
+    window.DRIVING_LOG_THEME = {{ theme_boundaries | tojson }};
+    window.DRIVING_LOG_SERVER_NOW = {{ server_now_utc | tojson }};
+  </script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <a class="brand" href="/">Daniel Driving Log</a>
+    <nav aria-label="Primary">
+      <a href="/drives">History</a>
+      <a href="/imports">Data</a>
+      <a href="/archives">Archives</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

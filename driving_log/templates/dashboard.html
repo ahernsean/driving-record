@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+  {% if live %}
+    <a class="live-banner" href="/live">
+      {{ "Drive in progress" if live.status == "active" else "Finish saving drive" }}
+    </a>
+  {% endif %}
+  <section class="hero">
+    <div class="gauge" style="--progress: {{ [100, totals.total_minutes / 36] | min }}%">
+      <strong>{{ format_minutes(totals.total_minutes) }}</strong>
+      <span>of 60h</span>
+    </div>
+    <div class="night-stat">
+      <span>Night driving</span>
+      <strong>{{ format_minutes(totals.night_minutes) }}</strong>
+      <small>of 10h</small>
+    </div>
+  </section>
+  <section class="stats">
+    <article><span>Remaining</span><strong>{{ format_minutes([0, 3600 - totals.total_minutes] | max) }}</strong></article>
+    <article><span>Recorded drives</span><strong>{{ totals.drive_count }}</strong></article>
+  </section>
+  {% if overages %}
+    <section class="warning-card">
+      <h2>Weekly cap review</h2>
+      {% for week in overages %}
+        <p>{{ format_minutes(week.overage_minutes) }} over the 10-hour advisory.</p>
+      {% endfor %}
+    </section>
+  {% endif %}
+  <section class="actions">
+    {% if not live %}
+      <form method="post" action="/live/start">
+        <input type="hidden" name="form_token" value="{{ token('live.start') }}">
+        <input type="hidden" name="request_id" value="{{ request.state.request_id if request.state.request_id is defined else '00000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+        <button class="primary" type="submit">Start a drive</button>
+      </form>
+    {% endif %}
+    <a class="button" href="/drives/new">Add drive manually</a>
+    <a class="button" href="/drives">View drives</a>
+    <a class="button secondary" href="/imports">Import or export</a>
+  </section>
+{% endblock %}

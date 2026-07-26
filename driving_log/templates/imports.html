@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Imports and exports</h1>
+  <section class="actions">
+    <a class="button primary" href="/csv/export">Download CSV backup</a>
+    <form class="stacked-form" method="post" action="/csv/import" enctype="multipart/form-data">
+      <input type="hidden" name="form_token" value="{{ token('csv.import') }}">
+      <label>Import CSV<input required type="file" name="file" accept=".csv,text/csv"></label>
+      <button type="submit">Review and import</button>
+    </form>
+  </section>
+  <h2>Import history</h2>
+  <div class="drive-list">
+    {% for batch in batches %}<article class="drive-row"><strong>{{ batch.source_name }}</strong><span>{{ batch.status }}</span><small>{{ batch.imported_at }}</small></article>
+    {% else %}<p class="empty">No imports yet.</p>{% endfor %}
+  </div>
+{% endblock %}

@@ -53,6 +53,10 @@ packages = ["driving_log"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
+markers = [
+  "browser: requires a locally installed Playwright browser",
+  "security: validates a security boundary or hostile input",
+]
 
 [tool.coverage.run]
 branch = true

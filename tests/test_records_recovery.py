@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from driving_log.archive import (
     ARCHIVE_FORMAT,
     application_lock,
@@ -210,6 +212,7 @@ class ArchiveTests(ServiceCase):
         restored.database.initialize()
         self.assertIsNone(restored.get(drive["id"])["deleted_at"])
 
+    @pytest.mark.security
     def test_restore_requires_confirmation_and_hash_is_checked(self) -> None:
         archive = create_archive(self.database, Path(self.temporary.name) / "archives")
         with self.assertRaisesRegex(ValueError, "confirmation"):
