@@ -204,9 +204,16 @@ class ArchiveTests(ServiceCase):
         with self.assertRaisesRegex(ValueError, "confirmation"):
             restore_archive(self.path, archive, confirm=False)
         damaged = Path(self.temporary.name) / "damaged.tar.gz"
-        content = bytearray(archive.read_bytes())
-        content[len(content) // 2] ^= 0xFF
-        damaged.write_bytes(content)
+        damaged_root = Path(self.temporary.name) / "damaged"
+        damaged_root.mkdir()
+        with tarfile.open(archive, "r:gz") as bundle:
+            bundle.extractall(damaged_root, filter="data")
+        database_bytes = bytearray((damaged_root / "database.sqlite3").read_bytes())
+        database_bytes[-1] ^= 0xFF
+        (damaged_root / "database.sqlite3").write_bytes(database_bytes)
+        with tarfile.open(damaged, "w:gz") as bundle:
+            bundle.add(damaged_root / "database.sqlite3", arcname="database.sqlite3")
+            bundle.add(damaged_root / "manifest.json", arcname="manifest.json")
         with self.assertRaises((ValueError, tarfile.TarError, EOFError)):
             verify_archive(damaged)
 
