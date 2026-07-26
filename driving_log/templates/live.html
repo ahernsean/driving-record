@@ -11,13 +11,11 @@
       <small data-sync-status>Server confirmed</small>
     </section>
     <div class="actions">
-      <form method="post" action="/live/{{ live.id }}/end" data-live-action="end" data-form-action="live.end">
-        <input type="hidden" name="form_token" value="{{ token('live.end') }}">
+      <form method="post" action="/live/{{ live.id }}/end" data-live-action="end" data-async-submit>
         <input type="hidden" name="request_id" value="{{ '30000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="primary" type="submit">End drive</button>
       </form>
-      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" data-form-action="live.cancel" onsubmit="return confirm('Cancel this live drive without saving it?')">
-        <input type="hidden" name="form_token" value="{{ token('live.cancel') }}">
+      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" data-async-submit onsubmit="return confirm('Cancel this live drive without saving it?')">
         <input type="hidden" name="request_id" value="{{ '40000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="danger" type="submit">Cancel drive</button>
       </form>
@@ -29,8 +27,7 @@
       <div><span>Calculated day / night</span><strong>{{ format_minutes(preview.day_minutes) }} / {{ format_minutes(preview.night_minutes) }}</strong></div>
       {% for warning in preview.warnings %}<div><span>Warning</span><strong>{{ warning }}</strong></div>{% endfor %}
     </section>
-    <form class="stacked-form" method="post" action="/live/{{ live.id }}/finalize" data-live-action="finalize" data-form-action="live.finalize">
-      <input type="hidden" name="form_token" value="{{ token('live.finalize') }}">
+    <form class="stacked-form" method="post" action="/live/{{ live.id }}/finalize" data-live-action="finalize" data-async-submit>
       <input type="hidden" name="request_id" value="{{ '50000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
       <label>Corrected end time (optional)
         <input type="datetime-local" name="corrected_end_local">
@@ -51,13 +48,11 @@
       <button class="primary" type="submit">Save completed drive</button>
     </form>
     <div class="actions">
-      <form method="post" action="/live/{{ live.id }}/resume" data-live-action="resume" data-form-action="live.resume">
-        <input type="hidden" name="form_token" value="{{ token('live.resume') }}">
+      <form method="post" action="/live/{{ live.id }}/resume" data-live-action="resume" data-async-submit>
         <input type="hidden" name="request_id" value="{{ '60000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button type="submit">Resume drive</button>
       </form>
-      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" data-form-action="live.cancel" onsubmit="return confirm('Cancel without saving?')">
-        <input type="hidden" name="form_token" value="{{ token('live.cancel') }}">
+      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" data-async-submit onsubmit="return confirm('Cancel without saving?')">
         <input type="hidden" name="request_id" value="{{ '70000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="danger" type="submit">Cancel</button>
       </form>

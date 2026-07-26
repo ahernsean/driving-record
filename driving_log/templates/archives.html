@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
   <h1>Full-state archives</h1>
-  <form method="post" action="/archives" data-form-action="archive.create">
-    <input type="hidden" name="form_token" value="{{ token('archive.create') }}">
+  <form method="post" action="/archives" data-async-submit>
     <button class="primary" type="submit">Create verified archive</button>
   </form>
   <div class="drive-list">

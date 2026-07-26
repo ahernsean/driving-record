@@ -230,7 +230,6 @@ class ApplicationTests(unittest.TestCase):
                 host="127.0.0.1",
                 port=8766,
                 public_host="testserver",
-                form_secret="test-secret",
             )
             app = create_app(settings)
 

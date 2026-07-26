@@ -57,8 +57,7 @@
   {% endif %}
   <section class="actions">
     {% if not live %}
-      <form method="post" action="/live/start" data-form-action="live.start">
-        <input type="hidden" name="form_token" value="{{ token('live.start') }}">
+      <form method="post" action="/live/start" data-async-submit>
         <input type="hidden" name="request_id" value="{{ request.state.request_id if request.state.request_id is defined else '00000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="primary" type="submit">Start a drive</button>
       </form>

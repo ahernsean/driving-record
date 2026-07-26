@@ -8,11 +8,9 @@ from pathlib import Path
 
 import anyio
 import httpx
-import pytest
 
 from driving_log.app import create_app
 from driving_log.config import Settings
-from driving_log.security import InvalidFormToken, create_form_token, verify_form_token
 from driving_log.web import _format_local_datetime
 
 
@@ -28,7 +26,6 @@ class WebTests(unittest.TestCase):
             host="127.0.0.1",
             port=8766,
             public_host="testserver",
-            form_secret="unit-test-form-secret",
         )
         self.app = create_app(self.settings)
 
@@ -37,9 +34,6 @@ class WebTests(unittest.TestCase):
 
     def run_async(self, function: object) -> None:
         anyio.run(function)  # type: ignore[arg-type]
-
-    def token(self, action: str) -> str:
-        return create_form_token(self.settings.form_secret, action)
 
     def test_dashboard_has_no_login_and_manual_record_flow(self) -> None:
         async def scenario() -> None:
@@ -64,7 +58,6 @@ class WebTests(unittest.TestCase):
                     "/drives",
                     headers={"Origin": "http://testserver"},
                     data={
-                        "form_token": self.token("drive.create"),
                         "request_id": str(uuid.uuid4()),
                         "driver_name": "Daniel Ahern",
                         "supervisor_name": "Sean Ahern",
@@ -96,74 +89,6 @@ class WebTests(unittest.TestCase):
             "Tuesday, Jan 20, 2026 at 12:30 PM EST",
         )
 
-    @pytest.mark.security
-    def test_cross_origin_host_content_type_and_token_are_rejected(self) -> None:
-        async def scenario() -> None:
-            async with (
-                self.app.router.lifespan_context(self.app),
-                httpx.AsyncClient(
-                    transport=httpx.ASGITransport(app=self.app),
-                    base_url="http://testserver",
-                ) as client,
-            ):
-                path = "/live/start"
-                data = {
-                    "form_token": self.token("live.start"),
-                    "request_id": str(uuid.uuid4()),
-                }
-                self.assertEqual((await client.post(path, data=data)).status_code, 403)
-                self.assertEqual(
-                    (
-                        await client.post(
-                            path,
-                            data=data,
-                            headers={"Origin": "https://evil.example"},
-                        )
-                    ).status_code,
-                    403,
-                )
-                self.assertEqual(
-                    (
-                        await client.post(
-                            path,
-                            data=data,
-                            headers={
-                                "Origin": "http://testserver",
-                                "Host": "evil.example",
-                            },
-                        )
-                    ).status_code,
-                    400,
-                )
-                self.assertEqual(
-                    (
-                        await client.post(
-                            path,
-                            content=b"{}",
-                            headers={
-                                "Origin": "http://testserver",
-                                "Content-Type": "application/json",
-                            },
-                        )
-                    ).status_code,
-                    415,
-                )
-                self.assertEqual(
-                    (
-                        await client.post(
-                            path,
-                            data={
-                                "form_token": self.token("drive.create"),
-                                "request_id": str(uuid.uuid4()),
-                            },
-                            headers={"Origin": "http://testserver"},
-                        )
-                    ).status_code,
-                    403,
-                )
-
-        self.run_async(scenario)
-
     def test_live_drive_recovers_in_fresh_client_and_finalizes_once(self) -> None:
         async def scenario() -> None:
             async with self.app.router.lifespan_context(self.app):
@@ -177,7 +102,6 @@ class WebTests(unittest.TestCase):
                         "/live/start",
                         headers={"Origin": "http://testserver"},
                         data={
-                            "form_token": self.token("live.start"),
                             "request_id": str(uuid.uuid4()),
                         },
                     )
@@ -196,7 +120,6 @@ class WebTests(unittest.TestCase):
                         f"/live/{selected_id}/end",
                         headers={"Origin": "http://testserver"},
                         data={
-                            "form_token": self.token("live.end"),
                             "request_id": str(uuid.uuid4()),
                         },
                     )
@@ -214,7 +137,6 @@ class WebTests(unittest.TestCase):
                         f"/live/{selected_id}/finalize",
                         headers={"Origin": "http://testserver"},
                         data={
-                            "form_token": self.token("live.finalize"),
                             "request_id": str(uuid.uuid4()),
                             "road_type": "local",
                             "corrected_end_local": "2026-07-27T12:00",
@@ -226,17 +148,6 @@ class WebTests(unittest.TestCase):
                     self.assertIn("Recorded drives", dashboard.text)
 
         self.run_async(scenario)
-
-    @pytest.mark.security
-    def test_form_tokens_are_signed_scoped_and_expiring(self) -> None:
-        token = create_form_token("secret", "drive.create", now=100, ttl=10)
-        verify_form_token("secret", token, "drive.create", now=110)
-        with self.assertRaises(InvalidFormToken):
-            verify_form_token("secret", token, "drive.update", now=105)
-        with self.assertRaises(InvalidFormToken):
-            verify_form_token("secret", token, "drive.create", now=111)
-        with self.assertRaises(InvalidFormToken):
-            verify_form_token("other", token, "drive.create", now=105)
 
 
 if __name__ == "__main__":

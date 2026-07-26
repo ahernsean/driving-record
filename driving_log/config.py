@@ -19,7 +19,8 @@ class Settings:
     host: str
     port: int
     public_host: str
-    form_secret: str
+    public_scheme: str = "http"
+    operation_secret: str = "development-only-operation-secret"
     development_allow_non_loopback: bool = False
 
     @classmethod
@@ -37,6 +38,10 @@ class Settings:
                 "Refusing non-loopback bind; set DRIVING_LOG_DEV_ALLOW_NON_LOOPBACK=1 "
                 "only for development"
             )
+        public_host = os.environ.get("DRIVING_LOG_PUBLIC_HOST", "127.0.0.1:8766")
+        public_scheme = os.environ.get("DRIVING_LOG_PUBLIC_SCHEME", "http")
+        if public_scheme not in {"http", "https"}:
+            raise ValueError("DRIVING_LOG_PUBLIC_SCHEME must be http or https")
         return cls(
             state_dir=state,
             database_path=Path(
@@ -48,8 +53,12 @@ class Settings:
             ),
             host=host,
             port=int(os.environ.get("DRIVING_LOG_PORT", "8766")),
-            public_host=os.environ.get("DRIVING_LOG_PUBLIC_HOST", "127.0.0.1:8766"),
-            form_secret=os.environ.get("DRIVING_LOG_FORM_SECRET", "development-only-secret"),
+            public_host=public_host,
+            public_scheme=public_scheme,
+            operation_secret=os.environ.get(
+                "DRIVING_LOG_OPERATION_SECRET",
+                "development-only-operation-secret",
+            ),
             development_allow_non_loopback=development_override,
         )
 

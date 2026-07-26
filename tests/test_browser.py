@@ -27,7 +27,6 @@ def test_mobile_webkit_live_drive_recovery() -> None:
             "DRIVING_LOG_STATE_DIR": temporary,
             "DRIVING_LOG_PORT": str(port),
             "DRIVING_LOG_PUBLIC_HOST": f"127.0.0.1:{port}",
-            "DRIVING_LOG_FORM_SECRET": "browser-test-secret",
         }
         server = subprocess.Popen(
             [

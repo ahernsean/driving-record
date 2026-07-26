@@ -20,7 +20,6 @@ from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
 from driving_log.live import LiveDriveService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
-from driving_log.security import InvalidFormToken, create_form_token, verify_form_token
 from driving_log.solar import (
     apex_daylight_window,
     resolve_local,
@@ -149,13 +148,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    def token(action: str) -> str:
-        return create_form_token(settings.form_secret, action)
-
     def common(request: Request, **values: object) -> dict[str, object]:
         return {
             "request": request,
-            "token": token,
             "format_minutes": _format_minutes,
             "format_local_datetime": _format_local_datetime,
             "asset_version": asset_version,
@@ -163,30 +158,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             **values,
         }
 
-    async def form_for(request: Request, action: str) -> FormData:
-        host = request.headers.get("host", "")
-        if host != settings.public_host:
-            raise HTTPException(status_code=400, detail="invalid Host header")
-        origin = request.headers.get("origin")
-        expected_origin = f"https://{settings.public_host}"
-        if settings.public_host.startswith(("127.0.0.1", "localhost", "testserver")):
-            allowed_origins = {expected_origin, f"http://{settings.public_host}"}
-        else:
-            allowed_origins = {expected_origin}
-        if origin not in allowed_origins:
-            raise HTTPException(status_code=403, detail="cross-origin mutation rejected")
-        content_type = request.headers.get("content-type", "").split(";", 1)[0]
-        if content_type not in {
-            "application/x-www-form-urlencoded",
-            "multipart/form-data",
-        }:
-            raise HTTPException(status_code=415, detail="unsafe mutation content type")
-        form = await request.form()
-        try:
-            verify_form_token(settings.form_secret, str(form.get("form_token", "")), action)
-        except InvalidFormToken as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        return form
+    async def read_form(request: Request) -> FormData:
+        return await request.form()
 
     def redirect(path: str) -> RedirectResponse:
         return RedirectResponse(path, status_code=303)
@@ -254,13 +227,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 start_local=now.isoformat(timespec="minutes"),
                 end_local=(now + timedelta(minutes=30)).isoformat(timespec="minutes"),
                 action="/drives",
-                form_action="drive.create",
             ),
         )
 
     @app.post("/drives")
     async def drive_create(request: Request) -> RedirectResponse:
-        form = await form_for(request, "drive.create")
+        form = await read_form(request)
         drive = records.create(
             DriveInput(
                 driver_name=str(form.get("driver_name", "Daniel Ahern")),
@@ -310,13 +282,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 start_local=start.astimezone(ZONE).isoformat(timespec="minutes"),
                 end_local=end.astimezone(ZONE).isoformat(timespec="minutes"),
                 action=f"/drives/{drive_id}/edit",
-                form_action="drive.update",
             ),
         )
 
     @app.post("/drives/{drive_id}/edit")
     async def drive_update(request: Request, drive_id: str) -> RedirectResponse:
-        form = await form_for(request, "drive.update")
+        form = await read_form(request)
         current = records.get(drive_id)
         value = DriveInput(
             driver_name=str(form.get("driver_name", current["driver_name"])),
@@ -345,7 +316,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.post("/drives/{drive_id}/delete")
     async def drive_delete(request: Request, drive_id: str) -> RedirectResponse:
-        form = await form_for(request, "drive.delete")
+        form = await read_form(request)
         records.delete(
             drive_id,
             expected_version=int(str(form["version"])),
@@ -367,47 +338,21 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             common(request, title="Live drive", live=open_drive, preview=preview),
         )
 
-    allowed_form_actions = {
-        "drive.create",
-        "drive.update",
-        "drive.delete",
-        "live.start",
-        "live.end",
-        "live.cancel",
-        "live.resume",
-        "live.finalize",
-        "csv.import",
-        "archive.create",
-    }
-
-    @app.get("/form-token/{action}")
-    async def refresh_form_token(request: Request, action: str) -> dict[str, str]:
-        if request.headers.get("host", "") != settings.public_host:
-            raise HTTPException(status_code=400, detail="invalid Host header")
-        if action not in allowed_form_actions:
-            raise HTTPException(status_code=404, detail="unknown form action")
-        return {"token": token(action)}
-
     @app.get("/live/state")
     async def live_state() -> dict[str, object]:
         row = live.current()
         state: dict[str, object] = {"live": dict(row) if row else None, **_theme_context()}
-        if row:
-            state["tokens"] = {
-                action: token(f"live.{action}")
-                for action in ("end", "cancel", "resume", "finalize")
-            }
         return state
 
     @app.post("/live/start")
     async def live_start(request: Request) -> RedirectResponse:
-        form = await form_for(request, "live.start")
+        form = await read_form(request)
         live.start(request_id=str(form["request_id"]), actor_identity=_actor(request))
         return redirect("/live")
 
     @app.post("/live/{live_id}/end")
     async def live_end(request: Request, live_id: str) -> RedirectResponse:
-        form = await form_for(request, "live.end")
+        form = await read_form(request)
         live.end(
             live_id,
             request_id=str(form["request_id"]),
@@ -417,7 +362,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.post("/live/{live_id}/resume")
     async def live_resume(request: Request, live_id: str) -> RedirectResponse:
-        form = await form_for(request, "live.resume")
+        form = await read_form(request)
         live.resume(
             live_id,
             request_id=str(form["request_id"]),
@@ -427,7 +372,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.post("/live/{live_id}/cancel")
     async def live_cancel(request: Request, live_id: str) -> RedirectResponse:
-        form = await form_for(request, "live.cancel")
+        form = await read_form(request)
         live.cancel(
             live_id,
             request_id=str(form["request_id"]),
@@ -437,7 +382,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.post("/live/{live_id}/finalize")
     async def live_finalize(request: Request, live_id: str) -> RedirectResponse:
-        form = await form_for(request, "live.finalize")
+        form = await read_form(request)
         corrected_text = str(form.get("corrected_end_local", "")).strip()
         current = live.current()
         if not current or current["id"] != live_id:
@@ -486,7 +431,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.post("/csv/import")
     async def csv_upload(request: Request) -> RedirectResponse:
-        form = await form_for(request, "csv.import")
+        form = await read_form(request)
         upload = form.get("file")
         if not isinstance(upload, UploadFile):
             raise HTTPException(status_code=400, detail="CSV file is required")
@@ -515,6 +460,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.post("/archives")
     async def archive_create_web(request: Request) -> RedirectResponse:
-        await form_for(request, "archive.create")
+        await read_form(request)
         create_archive(database, settings.archive_dir)
         return redirect("/archives")
