@@ -1,0 +1,19 @@
+[Unit]
+Description=Daniel supervised driving log
+After=network.target tailscaled.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/work/driving-record
+EnvironmentFile=-%h/.config/driving-log/environment
+ExecStart=%h/work/driving-record/driving-log serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/driving-log
+UMask=0077
+
+[Install]
+WantedBy=default.target
