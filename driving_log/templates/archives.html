@@ -6,7 +6,7 @@
     <button class="primary" type="submit">Create verified archive</button>
   </form>
   <div class="drive-list">
-    {% for archive in archives %}<article class="drive-row"><strong>{{ archive.name }}</strong></article>
+    {% for archive in archives %}<article class="drive-row"><strong>Verified archive</strong><small>{{ format_local_datetime(archive.created_at) }}</small></article>
     {% else %}<p class="empty">No archives yet.</p>{% endfor %}
   </div>
 {% endblock %}

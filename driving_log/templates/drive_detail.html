@@ -2,8 +2,8 @@
 {% block content %}
   <h1>Drive details</h1>
   <section class="detail-card">
-    <div><span>Started (UTC)</span><strong>{{ drive.started_at_utc }}</strong></div>
-    <div><span>Ended (UTC)</span><strong>{{ drive.ended_at_utc }}</strong></div>
+    <div><span>Started</span><strong>{{ format_local_datetime(drive.started_at_utc) }}</strong></div>
+    <div><span>Ended</span><strong>{{ format_local_datetime(drive.ended_at_utc) }}</strong></div>
     <div><span>Duration</span><strong>{{ format_minutes(drive.duration_minutes) }}</strong></div>
     <div><span>Day / night</span><strong>{{ format_minutes(drive.day_minutes) }} / {{ format_minutes(drive.night_minutes) }}</strong></div>
     <div><span>Road</span><strong>{{ drive.road_type }}</strong></div>

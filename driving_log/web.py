@@ -42,6 +42,23 @@ def _format_minutes(minutes: int) -> str:
     return f"{minutes // 60}h {minutes % 60:02d}m"
 
 
+def _local_datetime(value: str | datetime) -> datetime:
+    parsed = (
+        datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else value
+    )
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(ZONE)
+
+
+def _format_local_datetime(value: str | datetime) -> str:
+    local = _local_datetime(value)
+    hour = local.strftime("%I").lstrip("0") or "0"
+    return (
+        f"{local.strftime('%b')} {local.day}, {local.year} at {hour}:{local.strftime('%M %p %Z')}"
+    )
+
+
 def _theme_context(now: datetime | None = None) -> dict[str, object]:
     selected = (now or datetime.now(UTC)).astimezone(UTC)
     local = selected.astimezone(ZONE)
@@ -139,6 +156,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             "request": request,
             "token": token,
             "format_minutes": _format_minutes,
+            "format_local_datetime": _format_local_datetime,
             "asset_version": asset_version,
             **_theme_context(),
             **values,
@@ -476,11 +494,18 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.get("/archives", response_class=HTMLResponse)
     async def archives_page(request: Request) -> HTMLResponse:
-        archives = sorted(
+        archive_paths = sorted(
             settings.archive_dir.glob("*.tar.gz"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
+        archives = [
+            {
+                "path": path,
+                "created_at": datetime.fromtimestamp(path.stat().st_mtime, UTC),
+            }
+            for path in archive_paths
+        ]
         return templates.TemplateResponse(
             request,
             "archives.html",
