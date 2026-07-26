@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, HTTPException
 
 from driving_log import __version__
+from driving_log.archive import application_lock
 from driving_log.config import Settings
 from driving_log.db import Database
 from driving_log.logging_config import configure_logging
@@ -19,10 +20,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         configure_logging()
         selected.ensure_directories()
-        # Liveness remains available while readiness explains the safe refusal.
-        with suppress(Exception):
-            database.initialize()
-        yield
+        with application_lock(selected.state_dir, exclusive=False):
+            # Liveness remains available while readiness explains the safe refusal.
+            with suppress(Exception):
+                database.initialize()
+            yield
 
     app = FastAPI(title="Daniel Driving Log", version=__version__, lifespan=lifespan)
     app.state.settings = selected

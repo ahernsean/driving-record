@@ -187,12 +187,19 @@ class RecordService:
         request_id: str,
     ) -> sqlite3.Row:
         digest = payload_hash(
-            {"drive": _canonical_payload(value), "expected_version": expected_version}
+            {
+                "drive_id": drive_id,
+                "drive": _canonical_payload(value),
+                "expected_version": expected_version,
+            }
         )
         with self.database.transaction() as connection:
-            retry = self._mutation_retry(connection, request_id, "drive.update", digest)
+            retry = self._mutation_retry(connection, request_id, "drive.update", digest, drive_id)
             if retry:
-                return self.get(drive_id, connection=connection)
+                current_retry = self.get(drive_id, connection=connection)
+                if current_retry["version"] != expected_version + 1:
+                    raise ConflictError("the original update result has since changed")
+                return current_retry
             current = self.get(drive_id, connection=connection)
             if current["version"] != expected_version:
                 raise ConflictError(
@@ -233,14 +240,17 @@ class RecordService:
                 entity_type="drive",
                 entity_id=drive_id,
                 outcome="updated",
-                metadata={"previous_version": expected_version},
+                metadata={
+                    "previous_version": expected_version,
+                    "result_version": expected_version + 1,
+                },
             )
             return self.get(drive_id, connection=connection)
 
     def delete(self, drive_id: str, *, expected_version: int, request_id: str) -> sqlite3.Row:
         digest = payload_hash({"drive_id": drive_id, "expected_version": expected_version})
         with self.database.transaction() as connection:
-            retry = self._mutation_retry(connection, request_id, "drive.delete", digest)
+            retry = self._mutation_retry(connection, request_id, "drive.delete", digest, drive_id)
             current = self.get(drive_id, include_deleted=True, connection=connection)
             if retry:
                 return current
@@ -265,14 +275,23 @@ class RecordService:
 
     @staticmethod
     def _mutation_retry(
-        connection: sqlite3.Connection, request_id: str, action: str, digest: str
+        connection: sqlite3.Connection,
+        request_id: str,
+        action: str,
+        digest: str,
+        entity_id: str,
     ) -> bool:
         event = connection.execute(
-            "SELECT action, payload_hash FROM audit_events WHERE request_id=?", (request_id,)
+            "SELECT action, payload_hash, entity_id FROM audit_events WHERE request_id=?",
+            (request_id,),
         ).fetchone()
         if not event:
             return False
-        if event["action"] != action or event["payload_hash"] != digest:
+        if (
+            event["action"] != action
+            or event["payload_hash"] != digest
+            or event["entity_id"] != entity_id
+        ):
             raise ConflictError("request ID was already used for a different mutation")
         return True
 

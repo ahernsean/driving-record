@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
+import sqlite3
 import tarfile
 import tempfile
 import unittest
@@ -10,11 +13,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from driving_log.archive import create_archive, restore_archive, verify_archive
+from driving_log.archive import (
+    ARCHIVE_FORMAT,
+    application_lock,
+    create_archive,
+    restore_archive,
+    verify_archive,
+)
 from driving_log.csv_backup import CSV_COLUMNS, export_csv, import_csv
 from driving_log.db import Database
 from driving_log.records import ConflictError, DriveInput, RecordService
 from driving_log.seed import parse_log_text, parse_pdf_text
+from driving_log.solar import NonexistentLocalTimeError
 
 
 class ServiceCase(unittest.TestCase):
@@ -86,6 +96,24 @@ class RecordTests(ServiceCase):
         )
         self.assertIsNotNone(deleted["deleted_at"])
         self.assertEqual(self.service.totals()["drive_count"], 0)
+
+    def test_update_request_is_bound_to_target_drive(self) -> None:
+        first = self.service.create(self.drive())
+        second = self.service.create(self.drive(datetime(2026, 7, 20, 13, tzinfo=self.zone)))
+        request = str(uuid.uuid4())
+        self.service.update(
+            first["id"],
+            self.drive(minutes=45),
+            expected_version=1,
+            request_id=request,
+        )
+        with self.assertRaises(ConflictError):
+            self.service.update(
+                second["id"],
+                self.drive(minutes=45),
+                expected_version=1,
+                request_id=request,
+            )
 
     def test_overlap_intrinsic_and_weekly_warnings_are_derived(self) -> None:
         start = datetime(2026, 7, 19, 8, tzinfo=self.zone)
@@ -182,6 +210,44 @@ class ArchiveTests(ServiceCase):
         with self.assertRaises((ValueError, tarfile.TarError, EOFError)):
             verify_archive(damaged)
 
+    def test_archive_creation_refuses_overwrite(self) -> None:
+        target = Path(self.temporary.name) / "fixed.tar.gz"
+        create_archive(self.database, target.parent, target)
+        with self.assertRaises(FileExistsError):
+            create_archive(self.database, target.parent, target)
+
+    def test_archive_rejects_hash_valid_but_empty_database(self) -> None:
+        root = Path(self.temporary.name)
+        empty = root / "empty.sqlite3"
+        sqlite3.connect(empty).close()
+        manifest = root / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "archive_format": ARCHIVE_FORMAT,
+                    "application_version": "test",
+                    "schema_version": 0,
+                    "created_at_utc": "2026-07-26T00:00:00Z",
+                    "database_size": empty.stat().st_size,
+                    "database_sha256": hashlib.sha256(empty.read_bytes()).hexdigest(),
+                }
+            )
+        )
+        archive = root / "empty.tar.gz"
+        with tarfile.open(archive, "w:gz") as bundle:
+            bundle.add(empty, arcname="database.sqlite3")
+            bundle.add(manifest, arcname="manifest.json")
+        with self.assertRaisesRegex(ValueError, "authoritative tables"):
+            verify_archive(archive)
+
+    def test_restore_refuses_while_application_holds_shared_lock(self) -> None:
+        archive = create_archive(self.database, Path(self.temporary.name) / "archives")
+        with (
+            application_lock(self.path.parent, exclusive=False),
+            self.assertRaises(BlockingIOError),
+        ):
+            restore_archive(self.path, archive, confirm=True)
+
 
 class SeedParserTests(unittest.TestCase):
     def test_pdf_preserves_duplicate_rows(self) -> None:
@@ -213,6 +279,11 @@ class SeedParserTests(unittest.TestCase):
             21 * 60,
         )
         self.assertEqual(rows[1].warnings[0][0], "seed_ambiguous_duration")
+
+    def test_seed_parser_rejects_nonexistent_dst_time(self) -> None:
+        text = "* 2026-03-08 2:30 AM: 10 minutes, local roads"
+        with self.assertRaises(NonexistentLocalTimeError):
+            parse_log_text(text, "log.txt")
 
 
 if __name__ == "__main__":

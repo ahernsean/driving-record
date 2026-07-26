@@ -9,10 +9,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from driving_log.db import Database, utc_now_text
-from driving_log.records import DriveInput, RecordService
+from driving_log.records import ConflictError, DriveInput, RecordService
+from driving_log.solar import resolve_local
 
 SEED_NAMESPACE = uuid.UUID("39f4c819-c091-47ac-a8b8-b3be06c51be3")
 PDF_LINE = re.compile(
@@ -46,7 +46,6 @@ def _stable_id(source_name: str, row_key: str) -> str:
 
 def parse_pdf_text(text: str, source_name: str) -> list[SeedCandidate]:
     candidates: list[SeedCandidate] = []
-    zone = ZoneInfo("America/New_York")
     for line in text.splitlines():
         match = PDF_LINE.match(line.strip())
         if not match:
@@ -57,9 +56,10 @@ def parse_pdf_text(text: str, source_name: str) -> list[SeedCandidate]:
             raise ValueError(f"unexpected PDF duration: {line}")
         hours, minutes = map(int, durations[0])
         duration = hours * 60 + minutes
-        local_start = datetime.strptime(
+        local_start_naive = datetime.strptime(
             f"{match.group('date')} {match.group('time')}", "%m/%d/%Y %I:%M %p"
-        ).replace(tzinfo=zone)
+        )
+        local_start = resolve_local(local_start_naive)
         source_night = duration if re.search(r"-\s+\d+h\s+\d+m", details) else None
         source_day = None if source_night is not None else duration
         road_type = "highway" if "Highway" in details else "local"
@@ -113,7 +113,6 @@ def parse_pdf_text(text: str, source_name: str) -> list[SeedCandidate]:
 
 def parse_log_text(text: str, source_name: str) -> list[SeedCandidate]:
     candidates: list[SeedCandidate] = []
-    zone = ZoneInfo("America/New_York")
     for line in text.splitlines():
         match = LOG_LINE.match(line.strip())
         if not match:
@@ -124,7 +123,7 @@ def parse_log_text(text: str, source_name: str) -> list[SeedCandidate]:
             start_text += f" {match.group('start_ampm').strip()}"
             start_format = "%Y-%m-%d %I:%M %p"
         start_naive = datetime.strptime(start_text, start_format)
-        local_start = start_naive.replace(tzinfo=zone)
+        local_start = resolve_local(start_naive)
         details = match.group("details")
         duration_match = re.search(
             r"(?:(\d+):(\d+)\s*(?:hours?|hrs?)|\b(\d+)\s*min(?:utes?)?)", details
@@ -143,7 +142,7 @@ def parse_log_text(text: str, source_name: str) -> list[SeedCandidate]:
                 end_text += f" {match.group('end_ampm').strip()}"
                 end_format = "%I:%M %p"
             end_time = datetime.strptime(end_text, end_format).time()
-            local_end = datetime.combine(start_naive.date(), end_time, zone)
+            local_end = resolve_local(datetime.combine(start_naive.date(), end_time))
             if local_end <= local_start:
                 local_end += timedelta(days=1)
         warnings: list[tuple[str, str]] = []
@@ -278,11 +277,16 @@ def apply_seed(database: Database, pdf_path: Path, log_path: Path) -> dict[str, 
             source_unchanged = 0
             for candidate in candidates:
                 row = connection.execute(
-                    "SELECT id FROM import_rows WHERE source_type=? AND source_instance_id=? "
+                    "SELECT id, raw_text FROM import_rows "
+                    "WHERE source_type=? AND source_instance_id=? "
                     "AND source_row_key=?",
                     (candidate.source_type, source_name, candidate.row_key),
                 ).fetchone()
                 if row:
+                    if row["raw_text"] != candidate.raw_text:
+                        raise ConflictError(
+                            f"{source_name} row {candidate.row_key} changed since prior import"
+                        )
                     source_unchanged += 1
                     continue
                 imported = DriveInput(**{**candidate.drive.__dict__, "import_batch_id": batch_id})

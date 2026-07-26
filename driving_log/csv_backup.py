@@ -108,6 +108,14 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
     skipped = 0
     service = RecordService(database)
     with database.transaction() as transaction:
+        concurrent = transaction.execute(
+            "SELECT summary_json, status FROM import_batches WHERE content_sha256=?",
+            (digest,),
+        ).fetchone()
+        if concurrent:
+            if concurrent["status"] != "completed":
+                raise ConflictError("matching concurrent import is incomplete")
+            return cast(dict[str, object], json.loads(concurrent["summary_json"]))
         transaction.execute(
             """
             INSERT INTO import_batches VALUES (?, 'csv', ?, ?, ?, ?, ?, 'applying', '{}')
