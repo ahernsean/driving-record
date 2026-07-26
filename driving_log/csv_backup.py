@@ -67,7 +67,7 @@ def export_csv(database: Database) -> bytes:
 
 def import_csv(database: Database, content: bytes, source_name: str) -> dict[str, object]:
     digest = hashlib.sha256(content).hexdigest()
-    connection = database.connect()
+    connection = database.connect_readonly()
     existing = connection.execute(
         "SELECT summary_json, status FROM import_batches WHERE content_sha256=?", (digest,)
     ).fetchone()
@@ -127,13 +127,16 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
             return cast(dict[str, object], json.loads(concurrent["summary_json"]))
         transaction.execute(
             """
-            INSERT INTO import_batches VALUES (?, 'csv', ?, ?, ?, ?, ?, 'applying', '{}')
+            INSERT INTO import_batches (
+              id, source_type, source_name, content_sha256, format_version,
+              imported_at, raw_snapshot, status, summary_json
+            ) VALUES (?, 'csv', ?, ?, ?, ?, ?, 'applying', '{}')
             """,
             (
                 batch_id,
                 source_name,
                 digest,
-                FORMAT_VERSION,
+                expected_version,
                 utc_now_text(),
                 gzip.compress(content),
             ),
@@ -161,7 +164,11 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
                 created += 1
             transaction.execute(
                 """
-                INSERT INTO import_rows VALUES (?, ?, 'csv', ?, ?, ?, ?, ?, ?, NULL)
+                INSERT INTO import_rows (
+                  id, import_batch_id, source_type, source_instance_id,
+                  source_row_key, raw_text, parsed_payload_json, result_drive_id,
+                  status, error_message
+                ) VALUES (?, ?, 'csv', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -172,9 +179,25 @@ def import_csv(database: Database, content: bytes, source_name: str) -> dict[str
                     json.dumps(raw, sort_keys=True),
                     result_id,
                     status,
+                    (
+                        "Legacy CSV v1 has no end_location; that field was not compared"
+                        if expected_version == "1"
+                        else None
+                    ),
                 ),
             )
-        summary = {"batch_id": batch_id, "created": created, "skipped": skipped, "failed": 0}
+        summary = {
+            "batch_id": batch_id,
+            "created": created,
+            "skipped": skipped,
+            "failed": 0,
+            "warnings": len(candidates) if expected_version == "1" else 0,
+            "notes": (
+                ["Legacy CSV v1 has no end_location; that field was not compared"]
+                if expected_version == "1"
+                else []
+            ),
+        }
         transaction.execute(
             "UPDATE import_batches SET status='completed', summary_json=? WHERE id=?",
             (json.dumps(summary, sort_keys=True), batch_id),

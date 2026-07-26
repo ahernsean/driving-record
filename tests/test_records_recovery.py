@@ -247,7 +247,7 @@ class CsvTests(ServiceCase):
         self.assertEqual(export_csv(other), content)
 
     def test_imports_legacy_csv_without_an_end_location(self) -> None:
-        self.service.create(self.drive())
+        self.service.create(self.drive(end_location="Home"))
         current = list(csv.DictReader(io.StringIO(export_csv(self.database).decode())))[0]
         legacy = {column: current[column] for column in LEGACY_CSV_COLUMNS}
         legacy["format_version"] = "1"
@@ -255,9 +255,25 @@ class CsvTests(ServiceCase):
         writer = csv.DictWriter(output, fieldnames=LEGACY_CSV_COLUMNS, lineterminator="\n")
         writer.writeheader()
         writer.writerow(legacy)
+        content = output.getvalue().encode()
+        summary = import_csv(self.database, content, "legacy.csv")
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(summary["warnings"], 1)
+        audit = self.database.connect_readonly()
+        batch = audit.execute(
+            "SELECT format_version FROM import_batches WHERE id=?",
+            (summary["batch_id"],),
+        ).fetchone()
+        row = audit.execute(
+            "SELECT error_message FROM import_rows WHERE import_batch_id=?",
+            (summary["batch_id"],),
+        ).fetchone()
+        audit.close()
+        self.assertEqual(batch["format_version"], "1")
+        self.assertIn("not compared", row["error_message"])
         other = Database(Path(self.temporary.name) / "legacy.sqlite3")
         other.initialize()
-        import_csv(other, output.getvalue().encode(), "legacy.csv")
+        import_csv(other, content, "legacy.csv")
         self.assertEqual(RecordService(other).list_drives()[0]["end_location"], "")
 
     def test_rejects_duplicate_ids_before_mutation(self) -> None:

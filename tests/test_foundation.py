@@ -91,8 +91,12 @@ class DatabaseTests(unittest.TestCase):
         connection.commit()
         connection.close()
 
-        database = Database(self.path)
+        archive_dir = Path(self.temp.name) / "custom-archives"
+        database = Database(self.path, archive_dir)
         database.initialize()
+        pre_migration = list(archive_dir.glob("driving-log-pre-migration-v1-*.tar.gz"))
+        self.assertEqual(len(pre_migration), 1)
+        self.assertFalse((self.path.parent / "archives").exists())
         upgraded = database.connect()
         self.assertEqual(
             upgraded.execute("SELECT end_location FROM drives WHERE id='drive'").fetchone()[0],
