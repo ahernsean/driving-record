@@ -123,7 +123,7 @@ class LiveDriveService:
                 return row
             if row["status"] in ("completed", "cancelled"):
                 return row
-            if row["status"] != "active":
+            if row["status"] != "active":  # pragma: no cover - constrained by schema
                 raise ConflictError(f"cannot end drive in state {row['status']}")
             now = self.clock().astimezone(UTC)
             offset = now.astimezone(ZoneInfo(row["timezone_name"])).utcoffset()

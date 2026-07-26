@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -13,6 +14,8 @@ import unittest
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from subprocess import CompletedProcess
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -26,8 +29,14 @@ from driving_log.archive import (
 )
 from driving_log.csv_backup import CSV_COLUMNS, export_csv, import_csv
 from driving_log.db import Database
-from driving_log.records import ConflictError, DriveInput, RecordService
-from driving_log.seed import parse_log_text, parse_pdf_text
+from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
+from driving_log.seed import (
+    apply_seed,
+    extract_pdf,
+    parse_log_text,
+    parse_pdf_text,
+    preview_seed,
+)
 
 
 class ServiceCase(unittest.TestCase):
@@ -157,6 +166,65 @@ class RecordTests(ServiceCase):
         self.service.delete(first["id"], expected_version=1, request_id=str(uuid.uuid4()))
         self.assertEqual(self.service.warnings_for(second["id"]), [])
 
+    def test_retry_stale_delete_missing_reverse_and_midnight_guards(self) -> None:
+        with self.assertRaisesRegex(ValueError, "positive duration"):
+            self.service.create(self.drive(minutes=-1))
+        with self.assertRaisesRegex(NotFoundError, "drive not found"):
+            self.service.get(str(uuid.uuid4()))
+
+        created = self.service.create(self.drive())
+        first_request = str(uuid.uuid4())
+        self.service.update(
+            created["id"],
+            self.drive(minutes=40),
+            expected_version=1,
+            request_id=first_request,
+        )
+        self.service.update(
+            created["id"],
+            self.drive(minutes=50),
+            expected_version=2,
+            request_id=str(uuid.uuid4()),
+        )
+        with self.assertRaisesRegex(ConflictError, "since changed"):
+            self.service.update(
+                created["id"],
+                self.drive(minutes=40),
+                expected_version=1,
+                request_id=first_request,
+            )
+        with self.assertRaisesRegex(ConflictError, "changed before deletion"):
+            self.service.delete(
+                created["id"],
+                expected_version=1,
+                request_id=str(uuid.uuid4()),
+            )
+        delete_request = str(uuid.uuid4())
+        deleted = self.service.delete(
+            created["id"],
+            expected_version=3,
+            request_id=delete_request,
+        )
+        self.assertEqual(
+            self.service.delete(
+                created["id"],
+                expected_version=3,
+                request_id=delete_request,
+            )["id"],
+            deleted["id"],
+        )
+
+        midnight = self.service.create(
+            self.drive(
+                datetime(2026, 7, 20, 23, 45, tzinfo=self.zone),
+                minutes=30,
+            )
+        )
+        self.assertIn(
+            "crosses_midnight",
+            {warning["code"] for warning in self.service.warnings_for(midnight["id"])},
+        )
+
 
 class CsvTests(ServiceCase):
     def test_round_trip_and_duplicate_file_are_idempotent(self) -> None:
@@ -210,6 +278,54 @@ class CsvTests(ServiceCase):
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             import_csv(other, output.getvalue().encode(), "derived.csv")
         self.assertEqual(RecordService(other).list_drives(), [])
+
+    def test_validation_incomplete_retry_and_unchanged_existing_rows(self) -> None:
+        with self.assertRaisesRegex(ValueError, "UTF-8"):
+            import_csv(self.database, b"\xff", "invalid.csv")
+        with self.assertRaisesRegex(ValueError, "headers"):
+            import_csv(self.database, b"id,wrong\n1,2\n", "headers.csv")
+
+        self.service.create(self.drive())
+        content = export_csv(self.database)
+        rows = list(csv.DictReader(io.StringIO(content.decode())))
+        invalid_version = io.StringIO(newline="")
+        writer = csv.DictWriter(invalid_version, fieldnames=CSV_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        rows[0]["format_version"] = "2"
+        writer.writerows(rows)
+        with self.assertRaisesRegex(ValueError, "unsupported format"):
+            import_csv(self.database, invalid_version.getvalue().encode(), "version.csv")
+
+        rows[0]["format_version"] = "1"
+        rows[0]["started_at_utc"] = "not-a-date"
+        invalid_date = io.StringIO(newline="")
+        writer = csv.DictWriter(invalid_date, fieldnames=CSV_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+        with self.assertRaisesRegex(ValueError, "invalid drive data"):
+            import_csv(self.database, invalid_date.getvalue().encode(), "date.csv")
+
+        summary = import_csv(self.database, content, "same.csv")
+        self.assertEqual(summary["skipped"], 1)
+        incomplete = b"format_version,id\n"
+        digest = hashlib.sha256(incomplete).hexdigest()
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO import_batches
+                (id, source_type, source_name, content_sha256, format_version,
+                 imported_at, raw_snapshot, status, summary_json)
+                VALUES (?, 'csv', 'incomplete.csv', ?, '1', ?, ?, 'applying', '{}')
+                """,
+                (
+                    str(uuid.uuid4()),
+                    digest,
+                    datetime.now(UTC).isoformat(),
+                    gzip.compress(incomplete),
+                ),
+            )
+        with self.assertRaisesRegex(ConflictError, "prior import is incomplete"):
+            import_csv(self.database, incomplete, "incomplete.csv")
 
 
 class ArchiveTests(ServiceCase):
@@ -286,6 +402,112 @@ class ArchiveTests(ServiceCase):
         ):
             restore_archive(self.path, archive, confirm=True)
 
+    def test_archive_structure_manifest_migration_and_restore_rollback_guards(self) -> None:
+        root = Path(self.temporary.name)
+        archive = create_archive(self.database, root / "archives")
+
+        def variant(
+            name: str,
+            mutate: object | None = None,
+            *,
+            extra: bool = False,
+        ) -> Path:
+            workspace = root / name
+            workspace.mkdir()
+            with tarfile.open(archive, "r:gz") as bundle:
+                bundle.extractall(workspace, filter="data")
+            if callable(mutate):
+                mutate(workspace)
+            if extra:
+                (workspace / "extra").write_text("unexpected")
+            output = root / f"{name}.tar.gz"
+            with tarfile.open(output, "w:gz") as bundle:
+                bundle.add(workspace / "database.sqlite3", arcname="database.sqlite3")
+                bundle.add(workspace / "manifest.json", arcname="manifest.json")
+                if extra:
+                    bundle.add(workspace / "extra", arcname="extra")
+            return output
+
+        with self.assertRaisesRegex(ValueError, "unexpected"):
+            verify_archive(variant("extra", extra=True))
+
+        unsafe = root / "unsafe.tar.gz"
+        extracted = root / "unsafe-source"
+        extracted.mkdir()
+        with tarfile.open(archive, "r:gz") as bundle:
+            bundle.extract("manifest.json", extracted, filter="data")
+        with tarfile.open(unsafe, "w:gz") as bundle:
+            link = tarfile.TarInfo("database.sqlite3")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "/tmp/outside"
+            bundle.addfile(link)
+            bundle.add(extracted / "manifest.json", arcname="manifest.json")
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            verify_archive(unsafe)
+
+        def set_manifest(workspace: Path, **changes: object) -> None:
+            manifest_path = workspace / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest.update(changes)
+            manifest_path.write_text(json.dumps(manifest))
+
+        with self.assertRaisesRegex(ValueError, "unsupported archive format"):
+            verify_archive(
+                variant(
+                    "format",
+                    lambda workspace: set_manifest(workspace, archive_format="other"),
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "schema is newer"):
+            verify_archive(
+                variant(
+                    "future",
+                    lambda workspace: set_manifest(workspace, schema_version=999),
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "manifest schema"):
+            verify_archive(
+                variant(
+                    "schema-mismatch",
+                    lambda workspace: set_manifest(workspace, schema_version=0),
+                )
+            )
+
+        def damage_migration(workspace: Path) -> None:
+            database_path = workspace / "database.sqlite3"
+            connection = sqlite3.connect(database_path)
+            connection.execute("UPDATE schema_migrations SET checksum='different'")
+            connection.commit()
+            connection.close()
+            set_manifest(
+                workspace,
+                database_size=database_path.stat().st_size,
+                database_sha256=hashlib.sha256(database_path.read_bytes()).hexdigest(),
+            )
+
+        with self.assertRaisesRegex(ValueError, "migration"):
+            verify_archive(variant("migration", damage_migration))
+
+        with self.database.transaction() as connection:
+            connection.execute("INSERT INTO configuration VALUES ('rollback-test','current','now')")
+        with (
+            mock.patch(
+                "driving_log.archive.Database.initialize",
+                side_effect=RuntimeError("rehearsal failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "rehearsal failed"),
+        ):
+            restore_archive(self.path, archive, confirm=True)
+        restored = sqlite3.connect(self.path)
+        self.assertEqual(
+            restored.execute(
+                "SELECT value FROM configuration WHERE key='rollback-test'"
+            ).fetchone()[0],
+            "current",
+        )
+        restored.close()
+        self.assertTrue(list(self.path.parent.glob("quarantine-*/failed-restored.sqlite3")))
+
     def test_uncommitted_subprocess_crash_rolls_back_cleanly(self) -> None:
         script = (
             "import os, sqlite3, sys;"
@@ -357,6 +579,71 @@ class SeedParserTests(unittest.TestCase):
         row = parse_log_text(text, "log.txt")[0]
         self.assertEqual(row.drive.road_type, "unknown")
         self.assertEqual(row.warnings[0][0], "seed_ambiguous_local_time")
+
+    def test_parser_validation_and_format_variants(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no drive rows"):
+            parse_pdf_text("heading only", "seed.pdf")
+        with self.assertRaisesRegex(ValueError, "unexpected PDF duration"):
+            parse_pdf_text(
+                "08/10/2025 6:27 PM no duration Local Sean Ahern",
+                "seed.pdf",
+            )
+        with self.assertRaisesRegex(ValueError, "no drive rows"):
+            parse_log_text("heading only", "log.txt")
+        with self.assertRaisesRegex(ValueError, "no usable duration"):
+            parse_log_text("* 2026-07-24 11:10: local roads", "log.txt")
+
+        pdf = parse_pdf_text(
+            "08/10/2025 6:27 PM Highway - 0h 8m Sean Ahern",
+            "seed.pdf",
+        )[0]
+        self.assertEqual(pdf.drive.road_type, "highway")
+        self.assertEqual(pdf.source_night_minutes, 8)
+        log = parse_log_text(
+            "\n".join(
+                [
+                    "* 2026-07-24 11:10 PM-12:10 AM: 0:45 hours highway rain fog",
+                    "* 2026-07-25 10:00: 15 minutes highway clear",
+                ]
+            ),
+            "log.txt",
+        )
+        self.assertEqual(log[0].drive.road_type, "highway")
+        self.assertIn("seed_ambiguous_duration", {warning[0] for warning in log[0].warnings})
+        self.assertEqual(log[0].drive.weather, "rain, fog")
+
+    def test_extract_preview_apply_retry_and_conflict(self) -> None:
+        pdf_text = "08/10/2025 6:27 PM Highway - 0h 8m Sean Ahern"
+        log_text = "* 2026-07-24 11:10-11:31: local and highways with wet roads"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_path = root / "seed.pdf"
+            log_path = root / "log.txt"
+            pdf_path.write_bytes(b"pdf-v1")
+            log_path.write_text(log_text)
+            database = Database(root / "state.sqlite3")
+            database.initialize()
+            completed = CompletedProcess(["pdftotext"], 0, pdf_text, "")
+            with mock.patch("driving_log.seed.subprocess.run", return_value=completed) as run:
+                self.assertEqual(extract_pdf(pdf_path), pdf_text)
+                run.assert_called_with(
+                    ["pdftotext", "-layout", str(pdf_path), "-"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                preview = preview_seed(pdf_path, log_path)
+                self.assertEqual(preview["total_rows"], 2)
+                applied = apply_seed(database, pdf_path, log_path)
+                self.assertEqual(applied["created"], 2)
+                retried = apply_seed(database, pdf_path, log_path)
+                self.assertEqual(retried["unchanged"], 2)
+
+                pdf_path.write_bytes(b"pdf-v2")
+                changed = "08/10/2025 6:27 PM Highway - 0h 9m Sean Ahern"
+                run.return_value = CompletedProcess(["pdftotext"], 0, changed, "")
+                with self.assertRaisesRegex(ConflictError, "changed since prior import"):
+                    apply_seed(database, pdf_path, log_path)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from driving_log.db import Database
-from driving_log.live import LiveDriveService
+from driving_log.live import LiveDriveService, NoOpenDriveError
 from driving_log.records import ConflictError, RecordService
 
 
@@ -35,6 +35,8 @@ class LiveDriveTests(unittest.TestCase):
         first = self.service.start(request_id=request)
         retry = self.service.start(request_id=request)
         self.assertEqual(first["id"], retry["id"])
+        with self.assertRaisesRegex(ConflictError, "different data"):
+            self.service.start(request_id=request, driver_name="Different Driver")
         with self.assertRaises(ConflictError):
             self.service.start(request_id=str(uuid.uuid4()))
         recovered = LiveDriveService(self.database).current()
@@ -52,10 +54,26 @@ class LiveDriveTests(unittest.TestCase):
         )
         with self.assertRaises(ConflictError):
             self.service.end(live["id"], request_id=str(uuid.uuid4()))
-        resumed = self.service.resume(live["id"], request_id=str(uuid.uuid4()))
+        resume_request = str(uuid.uuid4())
+        resumed = self.service.resume(live["id"], request_id=resume_request)
         self.assertEqual(resumed["status"], "active")
-        cancelled = self.service.cancel(live["id"], request_id=str(uuid.uuid4()))
+        self.assertEqual(
+            self.service.resume(live["id"], request_id=resume_request)["status"],
+            "active",
+        )
+        with self.assertRaisesRegex(ConflictError, "only an ending"):
+            self.service.resume(live["id"], request_id=str(uuid.uuid4()))
+        cancel_request = str(uuid.uuid4())
+        cancelled = self.service.cancel(live["id"], request_id=cancel_request)
         self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(
+            self.service.cancel(live["id"], request_id=cancel_request)["status"],
+            "cancelled",
+        )
+        self.assertEqual(
+            self.service.cancel(live["id"], request_id=str(uuid.uuid4()))["status"],
+            "cancelled",
+        )
         self.assertEqual(RecordService(self.database).totals()["drive_count"], 0)
 
     def test_finalize_is_atomic_stable_and_idempotent(self) -> None:
@@ -117,6 +135,49 @@ class LiveDriveTests(unittest.TestCase):
         self.assertEqual(drive["started_at_utc"], "2026-07-26T11:55:00Z")
         self.assertEqual(drive["ended_at_utc"], "2026-07-26T12:35:00Z")
         self.assertEqual(drive["duration_minutes"], 40)
+
+    def test_missing_invalid_and_completed_state_guards(self) -> None:
+        with (
+            self.database.transaction() as connection,
+            self.assertRaises(NoOpenDriveError),
+        ):
+            self.service.get(str(uuid.uuid4()), connection)
+
+        live = self.service.start(request_id=str(uuid.uuid4()))
+        self.clock.value += timedelta(minutes=30)
+        self.service.end(live["id"], request_id=str(uuid.uuid4()))
+        self.service.finalize(
+            live["id"],
+            request_id=str(uuid.uuid4()),
+            road_type="local",
+        )
+        self.assertEqual(
+            self.service.end(live["id"], request_id=str(uuid.uuid4()))["status"],
+            "completed",
+        )
+        with self.assertRaisesRegex(ConflictError, "cannot be cancelled"):
+            self.service.cancel(live["id"], request_id=str(uuid.uuid4()))
+
+    def test_request_ids_are_bound_to_resume_and_cancel_actions(self) -> None:
+        live = self.service.start(request_id=str(uuid.uuid4()))
+        self.clock.value += timedelta(minutes=5)
+        self.service.end(live["id"], request_id=str(uuid.uuid4()))
+        reused = str(uuid.uuid4())
+        with self.database.transaction() as connection:
+            self.database.audit(
+                connection,
+                event_id=str(uuid.uuid4()),
+                request_id=reused,
+                action="different.action",
+                payload_hash="different",
+                entity_type="live_drive",
+                entity_id=live["id"],
+                outcome="test",
+            )
+        with self.assertRaisesRegex(ConflictError, "resume request ID"):
+            self.service.resume(live["id"], request_id=reused)
+        with self.assertRaisesRegex(ConflictError, "cancel request ID"):
+            self.service.cancel(live["id"], request_id=reused)
 
 
 if __name__ == "__main__":

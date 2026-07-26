@@ -14,7 +14,8 @@ from subprocess import CompletedProcess
 from unittest import mock
 
 from driving_log.archive import create_archive, verify_archive
-from driving_log.cli import main
+from driving_log.cli import doctor, main
+from driving_log.config import Settings
 from driving_log.db import Database
 from driving_log.operations import (
     apply_retention,
@@ -27,6 +28,18 @@ from driving_log.operations import (
 
 
 class OperationTests(unittest.TestCase):
+    @staticmethod
+    def settings(root: Path, *, public_host: str = "testserver") -> Settings:
+        return Settings(
+            state_dir=root,
+            database_path=root / "database.sqlite3",
+            archive_dir=root / "archives",
+            restore_dir=root / "restore",
+            host="127.0.0.1",
+            port=8766,
+            public_host=public_host,
+        )
+
     def test_replication_is_independently_verified(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -120,6 +133,9 @@ class OperationTests(unittest.TestCase):
         failure = CompletedProcess(["tailscale"], 1, "", "daemon unavailable")
         with mock.patch("driving_log.operations.subprocess.run", return_value=failure):
             self.assertFalse(tailscale_snapshot()["available"])
+        malformed = CompletedProcess(["tailscale"], 0, "not-json", "")
+        with mock.patch("driving_log.operations.subprocess.run", return_value=malformed):
+            self.assertEqual(tailscale_snapshot()["raw"], "not-json")
 
     def test_operational_cli_archive_live_and_import_status(self) -> None:
         with (
@@ -170,6 +186,253 @@ class OperationTests(unittest.TestCase):
             result = json.loads(result_path.read_text())
             self.assertEqual(result["status"], "completed")
             self.assertTrue(Path(result["quarantine"]).is_dir())
+
+    def test_cli_dispatches_service_and_diagnostic_commands(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.dict(
+                "os.environ",
+                {"DRIVING_LOG_STATE_DIR": temporary, "DRIVING_LOG_HOST": "127.0.0.1"},
+                clear=False,
+            ),
+        ):
+            completed = CompletedProcess(["systemctl"], 0, "ok\n", "")
+            with mock.patch(
+                "driving_log.cli.install_user_units",
+                return_value={"environment": "test"},
+            ) as install:
+                self.assertEqual(
+                    main(["install", "--public-host", "rocky:8443", "--public-scheme", "http"]),
+                    0,
+                )
+                install.assert_called_once()
+            with mock.patch("driving_log.cli.run_systemctl", return_value=completed) as systemctl:
+                for command in ("start", "stop", "restart"):
+                    self.assertEqual(main([command]), 0)
+                self.assertEqual(systemctl.call_count, 3)
+            with mock.patch(
+                "driving_log.cli.service_snapshot",
+                return_value={"driving-log-web.service": {"ActiveState": "active"}},
+            ):
+                self.assertEqual(main(["status"]), 0)
+            with mock.patch(
+                "driving_log.cli.subprocess.run",
+                return_value=CompletedProcess(["journalctl"], 7, "", ""),
+            ):
+                self.assertEqual(main(["logs"]), 7)
+            with mock.patch("uvicorn.run") as run:
+                self.assertEqual(main(["serve", "--host", "127.0.0.1", "--port", "9999"]), 0)
+                run.assert_called_once()
+            with mock.patch("driving_log.cli.doctor", return_value={"ready": True, "check": "ok"}):
+                self.assertEqual(main(["doctor"]), 0)
+                self.assertEqual(main(["doctor", "--json"]), 0)
+                self.assertEqual(main(["db", "check"]), 0)
+            with mock.patch(
+                "driving_log.cli.doctor", return_value={"ready": False, "error": "bad"}
+            ):
+                self.assertEqual(main(["doctor"]), 1)
+                self.assertEqual(main(["db", "check"]), 1)
+            with mock.patch(
+                "driving_log.cli.restore_archive",
+                return_value=Path(temporary) / "quarantine",
+            ):
+                self.assertEqual(
+                    main(
+                        ["archive", "restore", str(Path(temporary) / "archive.tar.gz"), "--confirm"]
+                    ),
+                    0,
+                )
+            with mock.patch(
+                "driving_log.cli.process_restore_request",
+                return_value=Path(temporary) / "result.json",
+            ):
+                self.assertEqual(main(["archive", "restore-request", str(uuid.uuid4())]), 0)
+
+    def test_cli_dispatches_seed_csv_and_archive_variants(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.dict(
+                "os.environ",
+                {"DRIVING_LOG_STATE_DIR": temporary, "DRIVING_LOG_HOST": "127.0.0.1"},
+                clear=False,
+            ),
+        ):
+            root = Path(temporary)
+            pdf = root / "seed.pdf"
+            log = root / "log.txt"
+            csv_input = root / "input.csv"
+            pdf.write_bytes(b"pdf")
+            log.write_text("log")
+            csv_input.write_bytes(b"csv")
+            with mock.patch("driving_log.cli.preview_seed", return_value={"total_rows": 2}):
+                self.assertEqual(
+                    main(["seed", "--preview", "--pdf", str(pdf), "--log", str(log)]),
+                    0,
+                )
+            with mock.patch("driving_log.cli.apply_seed", return_value={"created": 2}):
+                self.assertEqual(main(["seed", "--pdf", str(pdf), "--log", str(log)]), 0)
+            exported = root / "export.csv"
+            with mock.patch("driving_log.cli.export_csv", return_value=b"header\n"):
+                self.assertEqual(main(["csv", "export", "--out", str(exported)]), 0)
+                self.assertEqual(exported.read_bytes(), b"header\n")
+            with mock.patch("driving_log.cli.import_csv", return_value={"created": 1}):
+                self.assertEqual(main(["csv", "import", "--in", str(csv_input)]), 0)
+
+            archive = root / "explicit.tar.gz"
+            archive.write_bytes(b"archive")
+            with (
+                mock.patch("driving_log.cli.create_archive", return_value=archive),
+                mock.patch("driving_log.cli.apply_retention", return_value=[root / "old.tar.gz"]),
+            ):
+                self.assertEqual(main(["archive", "create", "--out", str(archive)]), 0)
+            with mock.patch(
+                "driving_log.cli.verify_archive",
+                return_value={"verified": True},
+            ):
+                self.assertEqual(main(["archive", "verify", str(archive)]), 0)
+            with mock.patch.dict(
+                "os.environ",
+                {"DRIVING_LOG_EXTERNAL_ARCHIVE_DIR": str(root / "external")},
+            ):
+                settings_archive = root / "archives"
+                settings_archive.mkdir(exist_ok=True)
+                local = settings_archive / "latest.tar.gz"
+                local.write_bytes(b"archive")
+                with mock.patch("driving_log.cli.replicate_archive", return_value=local):
+                    self.assertEqual(main(["archive", "replicate"]), 0)
+
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.dict(
+                "os.environ",
+                {
+                    "DRIVING_LOG_STATE_DIR": temporary,
+                    "DRIVING_LOG_HOST": "127.0.0.1",
+                    "DRIVING_LOG_EXTERNAL_ARCHIVE_DIR": str(Path(temporary) / "external"),
+                },
+                clear=False,
+            ),
+        ):
+            with self.assertRaisesRegex(SystemExit, "no archives found"):
+                main(["archive", "verify"])
+            with self.assertRaisesRegex(SystemExit, "no local archive"):
+                main(["archive", "replicate"])
+
+    def test_doctor_reports_database_archive_and_production_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            local = self.settings(root)
+            with (
+                mock.patch("driving_log.cli.service_snapshot", return_value={}),
+                mock.patch(
+                    "driving_log.cli.tailscale_snapshot",
+                    return_value={"available": False},
+                ),
+            ):
+                result = doctor(local)
+            self.assertFalse(result["ready"])
+            self.assertIn("database does not exist", str(result["error"]))
+            self.assertFalse(result["newest_archive_verification"]["verified"])  # type: ignore[index]
+
+            database = Database(local.database_path)
+            database.initialize()
+            archive = create_archive(database, local.archive_dir)
+            with (
+                mock.patch("driving_log.cli.verify_archive", side_effect=ValueError("damaged")),
+                mock.patch("driving_log.cli.service_snapshot", return_value={}),
+                mock.patch(
+                    "driving_log.cli.tailscale_snapshot",
+                    return_value={"available": False},
+                ),
+            ):
+                damaged = doctor(local)
+            self.assertEqual(damaged["newest_archive"], str(archive))
+            self.assertEqual(
+                damaged["newest_archive_verification"],
+                {"verified": False, "error": "damaged"},
+            )
+
+            production = self.settings(root, public_host="rocky.tail.test:8443")
+            services = {"driving-log-web.service": {"ActiveState": "active"}}
+            tailscale = {
+                "configuration": {
+                    "TCP": {"8443": {"HTTP": True}},
+                    "Web": {
+                        "rocky.tail.test:8443": {"Proxy": "http://127.0.0.1:8766"},
+                        "rocky.tail.test:80": {"Proxy": "http://127.0.0.1:8765"},
+                    },
+                }
+            }
+            with (
+                mock.patch("driving_log.cli.service_snapshot", return_value=services),
+                mock.patch("driving_log.cli.tailscale_snapshot", return_value=tailscale),
+            ):
+                healthy = doctor(production)
+            self.assertTrue(healthy["ready"])
+            self.assertTrue(healthy["deployment_checks"]["wordle_http_80_preserved"])  # type: ignore[index]
+
+    def test_retention_and_restore_request_rejection_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            invalid_archive = root / "driving-log-not-a-timestamp.tar.gz"
+            invalid_archive.write_bytes(b"keep")
+            self.assertEqual(apply_retention(root), [])
+            self.assertTrue(invalid_archive.exists())
+
+            operation_id = str(uuid.uuid4())
+            operation_dir = root / operation_id
+            operation_dir.mkdir()
+            request_path = operation_dir / "request.json"
+            secret = "restore-secret"
+
+            def write_request(payload: dict[str, object], *, valid: bool = True) -> None:
+                canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+                signature = hmac.new(
+                    secret.encode(),
+                    canonical,
+                    hashlib.sha256,
+                ).hexdigest()
+                request_path.write_text(
+                    json.dumps(
+                        {
+                            **payload,
+                            "signature": signature if valid else "invalid",
+                        }
+                    )
+                )
+
+            base: dict[str, object] = {
+                "archive_path": str(operation_dir / "archive.tar.gz"),
+                "archive_sha256": "expected",
+                "not_before": time.time() - 1,
+            }
+            write_request(base, valid=False)
+            with self.assertRaisesRegex(ValueError, "signature"):
+                process_restore_request(operation_id, root, root / "database.sqlite3", secret)
+
+            write_request({**base, "not_before": time.time() + 60})
+            with self.assertRaisesRegex(ValueError, "not active"):
+                process_restore_request(operation_id, root, root / "database.sqlite3", secret)
+
+            write_request({**base, "archive_path": str(root / "outside.tar.gz")})
+            with self.assertRaisesRegex(ValueError, "operation directory"):
+                process_restore_request(operation_id, root, root / "database.sqlite3", secret)
+
+            (operation_dir / "archive.tar.gz").write_bytes(b"archive")
+            write_request(base)
+            with (
+                mock.patch(
+                    "driving_log.operations.verify_archive",
+                    return_value={"archive_sha256": "different"},
+                ),
+                self.assertRaisesRegex(ValueError, "hash mismatch"),
+            ):
+                process_restore_request(
+                    operation_id,
+                    root,
+                    root / "database.sqlite3",
+                    secret,
+                )
 
 
 if __name__ == "__main__":

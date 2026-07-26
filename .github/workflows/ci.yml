@@ -19,7 +19,7 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
-      - run: pytest -m "not browser" --cov --cov-report=term-missing
+      - run: pytest -m "not browser" --cov --cov-report=term-missing --cov-fail-under=95
       - run: git diff --check
 
   rocky-sqlite:
