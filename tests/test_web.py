@@ -198,6 +198,7 @@ class WebTests(unittest.TestCase):
                             "request_id": str(uuid.uuid4()),
                             "road_type": "local",
                             "corrected_end_local": "2026-07-27T12:00",
+                            "acknowledge_warnings": "yes",
                         },
                     )
                     self.assertEqual(finalized.status_code, 303)

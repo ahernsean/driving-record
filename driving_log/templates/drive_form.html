@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
   <h1>{{ title }}</h1>
-  <form class="stacked-form" method="post" action="{{ action }}">
+  <form class="stacked-form" method="post" action="{{ action }}" data-form-action="{{ form_action }}">
     <input type="hidden" name="form_token" value="{{ token(form_action) }}">
     <input type="hidden" name="request_id" value="{{ '10000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     {% if drive %}<input type="hidden" name="version" value="{{ drive.version }}">{% endif %}

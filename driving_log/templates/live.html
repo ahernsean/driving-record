@@ -5,18 +5,18 @@
     <p class="empty">There is no active drive.</p>
     <a class="button primary" href="/">Return to dashboard</a>
   {% elif live.status == "active" %}
-    <section class="live-clock" data-live-start="{{ live.started_at_utc }}" data-server-now="{{ server_now_utc }}">
+    <section class="live-clock" data-live-id="{{ live.id }}" data-live-start="{{ live.started_at_utc }}" data-server-now="{{ server_now_utc }}">
       <span>Started {{ live.started_at_utc }}</span>
       <strong data-duration>0:00:00</strong>
       <small data-sync-status>Server confirmed</small>
     </section>
     <div class="actions">
-      <form method="post" action="/live/{{ live.id }}/end" data-live-action="end">
+      <form method="post" action="/live/{{ live.id }}/end" data-live-action="end" data-form-action="live.end">
         <input type="hidden" name="form_token" value="{{ token('live.end') }}">
         <input type="hidden" name="request_id" value="{{ '30000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="primary" type="submit">End drive</button>
       </form>
-      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" onsubmit="return confirm('Cancel this live drive without saving it?')">
+      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" data-form-action="live.cancel" onsubmit="return confirm('Cancel this live drive without saving it?')">
         <input type="hidden" name="form_token" value="{{ token('live.cancel') }}">
         <input type="hidden" name="request_id" value="{{ '40000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="danger" type="submit">Cancel drive</button>
@@ -24,7 +24,12 @@
     </div>
   {% else %}
     <section class="warning-card"><h2>Drive ended</h2><p>The end time is safely stored. Finish the details below.</p></section>
-    <form class="stacked-form" method="post" action="/live/{{ live.id }}/finalize" data-live-action="finalize">
+    <section class="detail-card">
+      <div><span>Provisional duration</span><strong>{{ format_minutes(preview.duration_minutes) }}</strong></div>
+      <div><span>Calculated day / night</span><strong>{{ format_minutes(preview.day_minutes) }} / {{ format_minutes(preview.night_minutes) }}</strong></div>
+      {% for warning in preview.warnings %}<div><span>Warning</span><strong>{{ warning }}</strong></div>{% endfor %}
+    </section>
+    <form class="stacked-form" method="post" action="/live/{{ live.id }}/finalize" data-live-action="finalize" data-form-action="live.finalize">
       <input type="hidden" name="form_token" value="{{ token('live.finalize') }}">
       <input type="hidden" name="request_id" value="{{ '50000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
       <label>Corrected end time (optional)
@@ -42,15 +47,16 @@
         <label>Supervisor license<input name="supervisor_dl_number" autocomplete="off"></label>
         <label>State<input name="supervisor_dl_state" maxlength="2"></label>
       </div>
+      <label class="choice"><input required type="checkbox" name="acknowledge_warnings" value="yes"> I reviewed the calculated totals and understand any corrected end time is checked again.</label>
       <button class="primary" type="submit">Save completed drive</button>
     </form>
     <div class="actions">
-      <form method="post" action="/live/{{ live.id }}/resume" data-live-action="resume">
+      <form method="post" action="/live/{{ live.id }}/resume" data-live-action="resume" data-form-action="live.resume">
         <input type="hidden" name="form_token" value="{{ token('live.resume') }}">
         <input type="hidden" name="request_id" value="{{ '60000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button type="submit">Resume drive</button>
       </form>
-      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" onsubmit="return confirm('Cancel without saving?')">
+      <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" data-form-action="live.cancel" onsubmit="return confirm('Cancel without saving?')">
         <input type="hidden" name="form_token" value="{{ token('live.cancel') }}">
         <input type="hidden" name="request_id" value="{{ '70000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="danger" type="submit">Cancel</button>

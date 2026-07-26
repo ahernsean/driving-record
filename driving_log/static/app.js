@@ -2,66 +2,111 @@
   "use strict";
   const root = document.documentElement;
   const metaTheme = document.querySelector('meta[name="theme-color"]');
+  const clock = document.querySelector(".live-clock");
   let boundaries = (window.DRIVING_LOG_THEME || []).map(value => new Date(value));
+  let serverOffset = new Date(window.DRIVING_LOG_SERVER_NOW).getTime() - Date.now();
+  let themeTimer;
+
+  function setTheme(theme) {
+    root.dataset.theme = theme;
+    if (metaTheme) metaTheme.content = theme === "light" ? "#f4f8ff" : "#101b2d";
+  }
 
   function applyThemeAt(now) {
     const elapsed = boundaries.filter(boundary => boundary <= now).length;
-    if (elapsed % 2) {
-      const theme = root.dataset.theme === "light" ? "dark" : "light";
-      root.dataset.theme = theme;
-      if (metaTheme) metaTheme.content = theme === "light" ? "#f4f8ff" : "#101b2d";
-      boundaries = boundaries.filter(boundary => boundary > now);
-    }
+    if (elapsed % 2) setTheme(root.dataset.theme === "light" ? "dark" : "light");
+    boundaries = boundaries.filter(boundary => boundary > now);
   }
-  function scheduleTheme() {
-    applyThemeAt(new Date());
-    const next = boundaries[0];
-    if (next) setTimeout(scheduleTheme, Math.max(0, next - new Date()) + 20);
-  }
-  scheduleTheme();
 
-  const clock = document.querySelector(".live-clock");
-  if (clock) {
-    const start = new Date(clock.dataset.liveStart);
-    const serverNow = new Date(clock.dataset.serverNow);
-    const receivedWall = Date.now();
-    const receivedMono = performance.now();
-    const serverOffset = serverNow.getTime() - receivedWall;
-    const output = clock.querySelector("[data-duration]");
-    const sync = clock.querySelector("[data-sync-status]");
-    function render(useWall = false) {
-      const projectedNow = useWall
-        ? Date.now() + serverOffset
-        : serverNow.getTime() + (performance.now() - receivedMono);
-      const total = Math.max(0, Math.floor((projectedNow - start.getTime()) / 1000));
-      const hours = Math.floor(total / 3600);
-      const minutes = Math.floor((total % 3600) / 60);
-      const seconds = total % 60;
-      output.textContent = `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  function scheduleTheme() {
+    clearTimeout(themeTimer);
+    applyThemeAt(new Date(Date.now() + serverOffset));
+    const next = boundaries[0];
+    if (next) {
+      themeTimer = setTimeout(
+        scheduleTheme,
+        Math.max(0, next.getTime() - (Date.now() + serverOffset)) + 20
+      );
+    } else {
+      themeTimer = setTimeout(() => refreshState().catch(() => {}), 60000);
     }
+  }
+
+  let start;
+  let serverNow;
+  let receivedMono;
+  const output = clock && clock.querySelector("[data-duration]");
+  const sync = clock && clock.querySelector("[data-sync-status]");
+
+  function rebaseClock(state) {
+    serverNow = new Date(state.server_now_utc);
+    serverOffset = serverNow.getTime() - Date.now();
+    receivedMono = performance.now();
+    if (state.live) start = new Date(state.live.started_at_utc);
+  }
+
+  function render(useWall = false) {
+    if (!clock || !start) return;
+    const projectedNow = useWall
+      ? Date.now() + serverOffset
+      : serverNow.getTime() + (performance.now() - receivedMono);
+    const total = Math.max(0, Math.floor((projectedNow - start.getTime()) / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    output.textContent =
+      `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function applyState(state) {
+    setTheme(state.theme);
+    boundaries = (state.theme_boundaries || []).map(value => new Date(value));
+    rebaseClock(state);
+    scheduleTheme();
+    if (clock) {
+      const currentId = clock.dataset.liveId;
+      if (!state.live || state.live.id !== currentId || state.live.status !== "active") {
+        window.location.reload();
+        return;
+      }
+      render();
+      sync.textContent = "Server confirmed";
+    }
+  }
+
+  function refreshState() {
+    return fetch("/live/state", {cache: "no-store"})
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(applyState);
+  }
+
+  if (clock) {
+    start = new Date(clock.dataset.liveStart);
+    serverNow = new Date(clock.dataset.serverNow);
+    receivedMono = performance.now();
     render();
     setInterval(render, 1000);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         render(true);
         sync.textContent = "Checking server…";
-        fetch("/live/state", {cache: "no-store"})
-          .then(response => response.ok ? response.json() : Promise.reject())
-          .then(() => { sync.textContent = "Server confirmed"; })
-          .catch(() => { sync.textContent = "Projected — server unavailable"; });
+        refreshState().catch(() => {
+          sync.textContent = "Projected — server unavailable";
+        });
       }
     });
   }
+  scheduleTheme();
 
-  document.querySelectorAll("form[data-live-action]").forEach(form => {
+  document.querySelectorAll("form[data-form-action]").forEach(form => {
     form.addEventListener("submit", event => {
       if (form.dataset.tokenRefreshed === "yes") return;
       event.preventDefault();
-      fetch("/live/state", {cache: "no-store"})
-        .then(response => response.json())
-        .then(state => {
-          const fresh = state.tokens && state.tokens[form.dataset.liveAction];
-          if (fresh) form.elements.form_token.value = fresh;
+      const action = form.dataset.formAction;
+      fetch(`/form-token/${encodeURIComponent(action)}`, {cache: "no-store"})
+        .then(response => response.ok ? response.json() : Promise.reject())
+        .then(result => {
+          form.elements.form_token.value = result.token;
           form.dataset.tokenRefreshed = "yes";
           form.requestSubmit();
         })

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -18,7 +19,12 @@ from driving_log.db import Database
 from driving_log.live import LiveDriveService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.security import InvalidFormToken, create_form_token, verify_form_token
-from driving_log.solar import apex_daylight_window, resolve_local
+from driving_log.solar import (
+    apex_daylight_window,
+    resolve_local,
+    split_day_night,
+    week_segments,
+)
 
 PACKAGE_DIR = Path(__file__).parent
 ZONE = ZoneInfo("America/New_York")
@@ -50,6 +56,55 @@ def _theme_context(now: datetime | None = None) -> dict[str, object]:
         "theme": theme,
         "theme_boundaries": sorted(boundaries),
         "server_now_utc": selected.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _live_preview(
+    database: Database,
+    records: RecordService,
+    row: sqlite3.Row,
+    end: datetime | None = None,
+) -> dict[str, object]:
+    live_row = dict(row)
+    start = datetime.fromisoformat(str(live_row["started_at_utc"]).replace("Z", "+00:00"))
+    selected_end = end or datetime.fromisoformat(
+        str(live_row["provisional_ended_at_utc"]).replace("Z", "+00:00")
+    )
+    duration = round((selected_end - start).total_seconds() / 60)
+    day, night = split_day_night(start, selected_end)
+    warnings: list[str] = []
+    if duration > 300:
+        warnings.append("Drive exceeds five hours.")
+    if start.astimezone(ZONE).date() != selected_end.astimezone(ZONE).date():
+        warnings.append("Drive crosses local midnight.")
+    connection = database.connect()
+    overlap_count = connection.execute(
+        "SELECT COUNT(*) FROM drives WHERE deleted_at IS NULL "
+        "AND started_at_utc < ? AND ended_at_utc > ?",
+        (
+            selected_end.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+            start.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        ),
+    ).fetchone()[0]
+    connection.close()
+    if overlap_count:
+        warnings.append(f"Drive overlaps {overlap_count} saved drive(s).")
+    totals = records.totals()
+    existing_weeks = cast(list[dict[str, object]], totals["weeks"])
+    by_start: dict[str, int] = {}
+    for week in existing_weeks:
+        minutes = week["minutes"]
+        assert isinstance(minutes, int)
+        by_start[str(week["week_start_utc"])] = minutes
+    for week_start, _week_end, minutes in week_segments(start, selected_end):
+        if by_start.get(week_start.isoformat(), 0) + minutes > 600:
+            warnings.append("Drive would put a calendar week over the 10-hour advisory.")
+            break
+    return {
+        "duration_minutes": duration,
+        "day_minutes": day,
+        "night_minutes": night,
+        "warnings": warnings,
     }
 
 
@@ -268,11 +323,37 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.get("/live", response_class=HTMLResponse)
     async def live_page(request: Request) -> HTMLResponse:
         open_drive = live.current()
+        preview = (
+            _live_preview(database, records, open_drive)
+            if open_drive and open_drive["status"] == "ending"
+            else None
+        )
         return templates.TemplateResponse(
             request,
             "live.html",
-            common(request, title="Live drive", live=open_drive),
+            common(request, title="Live drive", live=open_drive, preview=preview),
         )
+
+    allowed_form_actions = {
+        "drive.create",
+        "drive.update",
+        "drive.delete",
+        "live.start",
+        "live.end",
+        "live.cancel",
+        "live.resume",
+        "live.finalize",
+        "csv.import",
+        "archive.create",
+    }
+
+    @app.get("/form-token/{action}")
+    async def refresh_form_token(request: Request, action: str) -> dict[str, str]:
+        if request.headers.get("host", "") != settings.public_host:
+            raise HTTPException(status_code=400, detail="invalid Host header")
+        if action not in allowed_form_actions:
+            raise HTTPException(status_code=404, detail="unknown form action")
+        return {"token": token(action)}
 
     @app.get("/live/state")
     async def live_state() -> dict[str, object]:
@@ -325,6 +406,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     async def live_finalize(request: Request, live_id: str) -> RedirectResponse:
         form = await form_for(request, "live.finalize")
         corrected_text = str(form.get("corrected_end_local", "")).strip()
+        current = live.current()
+        if not current or current["id"] != live_id:
+            raise ConflictError("live drive is no longer awaiting finalization")
+        corrected_end = _parse_local(corrected_text) if corrected_text else None
+        preview = _live_preview(database, records, current, corrected_end)
+        if preview["warnings"] and form.get("acknowledge_warnings") != "yes":
+            raise HTTPException(status_code=400, detail="review and acknowledge drive warnings")
         drive = live.finalize(
             live_id,
             request_id=str(form["request_id"]),
@@ -334,7 +422,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             supervisor_name=str(form.get("supervisor_name", "")) or None,
             supervisor_dl_number=str(form.get("supervisor_dl_number", "")) or None,
             supervisor_dl_state=str(form.get("supervisor_dl_state", "")) or None,
-            corrected_end_utc=_parse_local(corrected_text) if corrected_text else None,
+            corrected_end_utc=corrected_end,
             actor_identity=_actor(request),
         )
         return redirect(f"/drives/{drive['id']}")
@@ -374,7 +462,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.get("/archives", response_class=HTMLResponse)
     async def archives_page(request: Request) -> HTMLResponse:
-        archives = sorted(settings.archive_dir.glob("*.tar.gz"), reverse=True)
+        archives = sorted(
+            settings.archive_dir.glob("*.tar.gz"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
         return templates.TemplateResponse(
             request,
             "archives.html",
