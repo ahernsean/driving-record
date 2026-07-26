@@ -63,6 +63,7 @@ def install_user_units(
         or secrets.token_urlsafe(48)
     )
     environment = {
+        **existing,
         "DRIVING_LOG_HOST": "127.0.0.1",
         "DRIVING_LOG_PORT": "8766",
         "DRIVING_LOG_PUBLIC_HOST": public_host,
@@ -97,12 +98,16 @@ def install_user_units(
 def service_snapshot() -> dict[str, object]:
     result: dict[str, object] = {}
     for unit in ("driving-log-web.service", "driving-log-archive.timer"):
-        status = run_systemctl(
-            "show",
-            unit,
-            "--property=ActiveState,SubState,NRestarts,UnitFileState",
-            check=False,
-        )
+        try:
+            status = run_systemctl(
+                "show",
+                unit,
+                "--property=ActiveState,SubState,NRestarts,UnitFileState",
+                check=False,
+            )
+        except OSError as exc:
+            result[unit] = {"available": False, "error": str(exc)}
+            continue
         result[unit] = {
             line.split("=", 1)[0]: line.split("=", 1)[1]
             for line in status.stdout.splitlines()
@@ -112,12 +117,15 @@ def service_snapshot() -> dict[str, object]:
 
 
 def tailscale_snapshot() -> dict[str, object]:
-    status = subprocess.run(
-        ["tailscale", "serve", "status", "--json"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        status = subprocess.run(
+            ["tailscale", "serve", "status", "--json"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        return {"available": False, "error": str(exc)}
     if status.returncode:
         return {"available": False, "error": status.stderr.strip()}
     try:
@@ -146,28 +154,34 @@ def replicate_archive(archive: Path, destination: Path) -> Path:
 
 
 def apply_retention(archive_dir: Path) -> list[Path]:
-    archives = sorted(archive_dir.glob("driving-log-*.tar.gz"), reverse=True)
-    keep = set(archives[:14])
-    weekly: set[tuple[int, int]] = set()
+    archives = list(archive_dir.glob("driving-log-*.tar.gz"))
+    keep = {
+        archive for archive in archives if archive.name.startswith("driving-log-pre-migration-")
+    }
+    dated: list[tuple[datetime, Path]] = []
     for archive in archives:
+        if archive in keep:
+            continue
         stamp = archive.name.removeprefix("driving-log-").removesuffix(".tar.gz")
-        created = None
         for time_format in ("%Y%m%dT%H%M%S%fZ", "%Y%m%dT%H%M%SZ"):
             try:
-                created = datetime.strptime(stamp, time_format).replace(tzinfo=UTC)
+                dated.append((datetime.strptime(stamp, time_format).replace(tzinfo=UTC), archive))
                 break
             except ValueError:
                 continue
-        if created is None:
+        else:
             keep.add(archive)
-            continue
+    dated.sort(reverse=True)
+    keep.update(archive for _, archive in dated[:14])
+    weekly: set[tuple[int, int]] = set()
+    for created, archive in dated:
         week = created.isocalendar()[:2]
         if week not in weekly and len(weekly) < 8:
             weekly.add(week)
             keep.add(archive)
     removed: list[Path] = []
-    for archive in archives:
-        if archive not in keep and ".pre-migration." not in archive.name:
+    for _, archive in dated:
+        if archive not in keep:
             archive.unlink()
             removed.append(archive)
     return removed
@@ -179,29 +193,56 @@ def process_restore_request(
     uuid.UUID(operation_id)
     operation_dir = restore_dir / operation_id
     request_path = operation_dir / "request.json"
+    result_path = operation_dir / "result.json"
+    in_progress_path = operation_dir / "in-progress.json"
+    if result_path.exists() or in_progress_path.exists():
+        raise ValueError("restore request was already consumed or interrupted")
     payload = json.loads(request_path.read_text(encoding="utf-8"))
     signature = str(payload.pop("signature", ""))
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     expected = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected):
         raise ValueError("restore request signature is invalid")
-    if float(payload["not_before"]) > time.time():
+    if str(payload["operation_id"]) != operation_id:
+        raise ValueError("restore request operation ID does not match")
+    now = time.time()
+    if float(payload["not_before"]) > now:
         raise ValueError("restore request is not active yet")
+    if float(payload["not_after"]) < now:
+        raise ValueError("restore request has expired")
     archive = Path(str(payload["archive_path"])).resolve()
     if archive.parent != operation_dir.resolve():
         raise ValueError("restore archive must be inside its operation directory")
     verified = verify_archive(archive)
     if verified["archive_sha256"] != payload["archive_sha256"]:
         raise ValueError("restore request archive hash mismatch")
-    quarantine = restore_archive(database_path, archive, confirm=True)
+    with in_progress_path.open("x", encoding="utf-8") as marker:
+        marker.write(
+            json.dumps(
+                {
+                    "operation_id": operation_id,
+                    "started_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        marker.flush()
+        os.fsync(marker.fileno())
+    try:
+        quarantine = restore_archive(database_path, archive, confirm=True)
+    except Exception:
+        in_progress_path.unlink(missing_ok=True)
+        raise
     result = {
         "operation_id": operation_id,
         "status": "completed",
         "quarantine": str(quarantine),
         "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
-    result_path = operation_dir / "result.json"
     temporary = operation_dir / ".result.json.tmp"
     temporary.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.chmod(0o600)
     os.replace(temporary, result_path)
+    in_progress_path.unlink()
     return result_path

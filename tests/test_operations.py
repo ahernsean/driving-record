@@ -67,6 +67,30 @@ class OperationTests(unittest.TestCase):
             self.assertTrue(removed)
             self.assertTrue(all(path in paths for path in removed))
 
+    def test_retention_never_counts_or_removes_pre_migration_archives(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            now = datetime(2026, 7, 26, tzinfo=UTC)
+            daily = []
+            for day in range(20):
+                stamp = (now - timedelta(days=day)).strftime("%Y%m%dT%H%M%SZ")
+                path = root / f"driving-log-{stamp}.tar.gz"
+                path.touch()
+                daily.append(path)
+            pre_migration = [
+                root
+                / (
+                    "driving-log-pre-migration-v1-"
+                    f"{(now - timedelta(days=day)).strftime('%Y%m%dT%H%M%SZ')}.tar.gz"
+                )
+                for day in range(3)
+            ]
+            for path in pre_migration:
+                path.touch()
+            apply_retention(root)
+            self.assertTrue(all(path.exists() for path in pre_migration))
+            self.assertTrue(all(path.exists() for path in daily[:14]))
+
     def test_systemd_service_binds_only_through_configured_loopback(self) -> None:
         root = Path(__file__).parent.parent
         service = (root / "deploy/systemd/driving-log-web.service").read_text()
@@ -113,6 +137,20 @@ class OperationTests(unittest.TestCase):
             self.assertEqual(len(list(unit_dir.iterdir())), 4)
             self.assertEqual(systemctl.call_count, 2)
 
+            environment.write_text(
+                contents + "DRIVING_LOG_DATABASE=/custom/database.sqlite3\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch("driving_log.operations.Path.home", return_value=home),
+                mock.patch("driving_log.operations.run_systemctl"),
+            ):
+                install_user_units(repo, public_host="driving.example.ts.net:8443")
+            self.assertIn(
+                "DRIVING_LOG_DATABASE=/custom/database.sqlite3",
+                environment.read_text(encoding="utf-8"),
+            )
+
     def test_operational_snapshots_report_success_and_failure(self) -> None:
         completed = CompletedProcess(
             ["systemctl"],
@@ -136,6 +174,17 @@ class OperationTests(unittest.TestCase):
         malformed = CompletedProcess(["tailscale"], 0, "not-json", "")
         with mock.patch("driving_log.operations.subprocess.run", return_value=malformed):
             self.assertEqual(tailscale_snapshot()["raw"], "not-json")
+        with mock.patch(
+            "driving_log.operations.run_systemctl", side_effect=FileNotFoundError("systemctl")
+        ):
+            self.assertFalse(
+                service_snapshot()["driving-log-web.service"]["available"]  # type: ignore[index]
+            )
+        with mock.patch(
+            "driving_log.operations.subprocess.run",
+            side_effect=FileNotFoundError("tailscale"),
+        ):
+            self.assertFalse(tailscale_snapshot()["available"])
 
     def test_operational_cli_archive_live_and_import_status(self) -> None:
         with (
@@ -166,9 +215,11 @@ class OperationTests(unittest.TestCase):
             copied = operation_dir / archive.name
             shutil.copy2(archive, copied)
             payload: dict[str, object] = {
+                "operation_id": operation_id,
                 "archive_path": str(copied.resolve()),
                 "archive_sha256": verify_archive(copied)["archive_sha256"],
                 "not_before": time.time() - 1,
+                "not_after": time.time() + 60,
             }
             canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
             payload["signature"] = hmac.new(
@@ -186,6 +237,13 @@ class OperationTests(unittest.TestCase):
             result = json.loads(result_path.read_text())
             self.assertEqual(result["status"], "completed")
             self.assertTrue(Path(result["quarantine"]).is_dir())
+            with self.assertRaisesRegex(ValueError, "already consumed"):
+                process_restore_request(
+                    operation_id,
+                    root / "restore-requests",
+                    database_path,
+                    "restore-secret",
+                )
 
     def test_cli_dispatches_service_and_diagnostic_commands(self) -> None:
         with (
@@ -402,9 +460,11 @@ class OperationTests(unittest.TestCase):
                 )
 
             base: dict[str, object] = {
+                "operation_id": operation_id,
                 "archive_path": str(operation_dir / "archive.tar.gz"),
                 "archive_sha256": "expected",
                 "not_before": time.time() - 1,
+                "not_after": time.time() + 60,
             }
             write_request(base, valid=False)
             with self.assertRaisesRegex(ValueError, "signature"):
@@ -412,6 +472,14 @@ class OperationTests(unittest.TestCase):
 
             write_request({**base, "not_before": time.time() + 60})
             with self.assertRaisesRegex(ValueError, "not active"):
+                process_restore_request(operation_id, root, root / "database.sqlite3", secret)
+
+            write_request({**base, "not_after": time.time() - 1})
+            with self.assertRaisesRegex(ValueError, "expired"):
+                process_restore_request(operation_id, root, root / "database.sqlite3", secret)
+
+            write_request({**base, "operation_id": str(uuid.uuid4())})
+            with self.assertRaisesRegex(ValueError, "operation ID"):
                 process_restore_request(operation_id, root, root / "database.sqlite3", secret)
 
             write_request({**base, "archive_path": str(root / "outside.tar.gz")})

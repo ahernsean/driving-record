@@ -233,6 +233,40 @@ class WebTests(unittest.TestCase):
 
         self.run_async(scenario)
 
+    def test_live_drive_resume_and_cancel_routes(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                await client.post("/live/start", data={"request_id": str(uuid.uuid4())})
+                live_id = (await client.get("/live/state")).json()["live"]["id"]
+                await client.post(
+                    f"/live/{live_id}/end",
+                    data={"request_id": str(uuid.uuid4())},
+                )
+                resumed = await client.post(
+                    f"/live/{live_id}/resume",
+                    data={"request_id": str(uuid.uuid4())},
+                )
+                self.assertEqual(resumed.status_code, 303)
+                await client.post(
+                    f"/live/{live_id}/end",
+                    data={"request_id": str(uuid.uuid4())},
+                )
+                cancelled = await client.post(
+                    f"/live/{live_id}/cancel",
+                    data={"request_id": str(uuid.uuid4())},
+                )
+                self.assertEqual(cancelled.status_code, 303)
+                self.assertEqual(cancelled.headers["location"], "/")
+
+        self.run_async(scenario)
+
 
 if __name__ == "__main__":
     unittest.main()

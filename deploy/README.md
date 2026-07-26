@@ -6,6 +6,8 @@ network authorization boundary; there is deliberately no application login.
 Install the checked-out stack tip:
 
 ```sh
+sudo dnf install -y epel-release
+sudo dnf install -y python3.13 python3.13-pip sqlite poppler-utils
 ./driving-log bootstrap
 ./driving-log install --public-host HOSTNAME:8443 --public-scheme http
 loginctl enable-linger "$USER"
@@ -26,3 +28,8 @@ Rocky disk.
 
 Microsoft Forms remains an adapter contract only. No workbook ID or
 credentials were available for this release.
+
+The restore helper is used only for a restore initiated by the running web
+application, so it deliberately restarts that application after the helper
+finishes. A direct CLI restore instead requires the web service to be stopped
+and does not invoke the helper unit.

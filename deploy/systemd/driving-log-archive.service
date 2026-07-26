@@ -7,4 +7,7 @@ WorkingDirectory=%h/work/driving-record
 EnvironmentFile=-%h/.config/driving-log/environment
 ExecStart=%h/work/driving-record/driving-log archive create
 ExecStart=%h/work/driving-record/driving-log archive replicate
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
 UMask=0077

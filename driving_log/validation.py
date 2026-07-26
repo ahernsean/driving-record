@@ -26,7 +26,7 @@ def validate_interval(
 ) -> ValidatedInterval:
     seconds = (ended_at_utc - started_at_utc).total_seconds()
     if seconds <= 0:
-        raise ValueError("drive duration must be positive")
+        raise ValueError("drive must have a positive duration")
     if (
         started_at_utc.second
         or started_at_utc.microsecond

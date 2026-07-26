@@ -255,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         print(result_path)
         return 0
     settings.ensure_directories()
-    database = Database(settings.database_path)
+    database = Database(settings.database_path, settings.archive_dir)
     database.initialize()
     if args.command == "seed":
         seed_result = (
