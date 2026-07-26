@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "${1:-}" = "bootstrap" ]; then
+  command -v python3.13 >/dev/null 2>&1 || {
+    echo "python3.13 is required" >&2
+    exit 1
+  }
+  python3.13 -m venv "$ROOT/.venv"
+  "$ROOT/.venv/bin/python" -m pip install --require-hashes -r "$ROOT/requirements.lock"
+  "$ROOT/.venv/bin/python" -m pip install --require-hashes -r "$ROOT/requirements-test.lock"
+  exit 0
+fi
+
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" -m driving_log.cli "$@"
+fi
+exec python3.13 -m driving_log.cli "$@"
+
