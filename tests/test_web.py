@@ -4,6 +4,7 @@ import re
 import tempfile
 import unittest
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
@@ -11,7 +12,7 @@ import httpx
 
 from driving_log.app import create_app
 from driving_log.config import Settings
-from driving_log.web import _format_local_datetime
+from driving_log.web import _format_local_datetime, _parse_local
 
 
 class WebTests(unittest.TestCase):
@@ -137,6 +138,10 @@ class WebTests(unittest.TestCase):
         self.assertEqual(
             _format_local_datetime("2026-01-20T17:30:00Z"),
             "Tuesday, Jan 20, 2026 at 12:30 PM EST",
+        )
+        self.assertEqual(
+            _parse_local("2026-11-01T01:30"),
+            datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
         )
 
     def test_live_drive_recovers_in_fresh_client_and_finalizes_once(self) -> None:

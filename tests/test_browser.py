@@ -137,6 +137,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 duration_minutes.fill("1")
                 assert end_input.input_value() != original_end
                 assert recovered.locator("[data-time-editor]").is_visible()
+                assert recovered.get_by_text("Repeated-time options").count() == 0
                 overflow = recovered.evaluate(
                     "document.documentElement.scrollWidth - document.documentElement.clientWidth"
                 )

@@ -27,7 +27,7 @@ ZONE = ZoneInfo("America/New_York")
 
 def _parse_local(value: str, fold_text: str | None = None) -> datetime:
     naive = datetime.fromisoformat(value)
-    fold = int(fold_text) if fold_text in ("0", "1") else None
+    fold = int(fold_text) if fold_text in ("0", "1") else 0
     return resolve_local(naive, fold=fold).astimezone(UTC)
 
 
