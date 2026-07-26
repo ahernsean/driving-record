@@ -138,6 +138,8 @@ class WebTests(unittest.TestCase):
                     self.assertNotIn('name="acknowledge_warnings"', completion.text)
                     self.assertNotIn('name="supervisor_dl_number"', completion.text)
                     self.assertNotIn('name="supervisor_dl_state"', completion.text)
+                    self.assertIn("Tap to change the recorded end time", completion.text)
+                    self.assertIn("Leave blank to use the stored end time above", completion.text)
                     # The HTTP scenario is intentionally short, so correct the end into
                     # the future enough to produce a valid minute-based record.
                     finalized = await newest.post(

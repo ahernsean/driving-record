@@ -98,6 +98,16 @@
   }
   scheduleTheme();
 
+  document.querySelectorAll(".optional-datetime").forEach(container => {
+    const input = container.querySelector('input[type="datetime-local"]');
+    const updateEmptyState = () => {
+      container.dataset.empty = input.value ? "no" : "yes";
+    };
+    input.addEventListener("input", updateEmptyState);
+    input.addEventListener("change", updateEmptyState);
+    updateEmptyState();
+  });
+
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;

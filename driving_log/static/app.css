@@ -122,11 +122,17 @@ input, textarea, select {
   width: 100%; min-height: 3rem; border: 1px solid var(--border); border-radius: .7rem;
   padding: .7rem; background: var(--panel); color: var(--text);
 }
+.optional-datetime { position: relative; display: block; font-weight: 400; }
+.datetime-prompt {
+  display: none; position: absolute; inset: 1px; align-items: center; padding: .7rem;
+  border-radius: .7rem; background: var(--panel); color: var(--muted); pointer-events: none;
+}
+.optional-datetime[data-empty="yes"]:not(:focus-within) .datetime-prompt { display: flex; }
 fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; border: 1px solid var(--border); border-radius: .8rem; }
 .choice { display: flex !important; align-items: center; min-height: 2.8rem; }
 .choice input { width: 1.4rem; min-height: 1.4rem; margin-right: .4rem; }
 .two-column { display: grid; grid-template-columns: 2fr 1fr; gap: .7rem; }
-.field-note, .empty { color: var(--muted); }
+.field-note, .empty { color: var(--muted); font-weight: 400; }
 .detail-card { display: grid; gap: 1rem; }
 .detail-card div { display: grid; gap: .2rem; overflow-wrap: anywhere; }
 .warning-card { background: var(--warning); margin: 1rem 0; }

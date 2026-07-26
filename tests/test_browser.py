@@ -128,6 +128,14 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert overflow <= 0
                 recovered.get_by_role("button", name="End drive").click()
                 recovered.get_by_text("The end time is safely stored").wait_for()
+                corrected_end = recovered.locator('input[name="corrected_end_local"]')
+                corrected_prompt = recovered.get_by_text("Tap to change the recorded end time")
+                assert corrected_end.input_value() == ""
+                assert corrected_prompt.is_visible()
+                corrected_end.focus()
+                assert not corrected_prompt.is_visible()
+                corrected_end.evaluate("element => element.blur()")
+                assert corrected_prompt.is_visible()
                 assert recovered.locator('input[name="acknowledge_warnings"]').count() == 0
                 assert recovered.locator('input[name="supervisor_dl_number"]').count() == 0
                 assert recovered.locator('input[name="supervisor_dl_state"]').count() == 0
