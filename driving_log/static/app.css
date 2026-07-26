@@ -38,17 +38,69 @@ nav { display: flex; gap: 1rem; font-size: .88rem; }
 main { width: min(100%, 42rem); margin: auto; padding: 1rem 1rem max(2rem, env(safe-area-inset-bottom)); }
 h1 { font-size: 1.75rem; margin: .4rem 0 1.2rem; }
 h2 { font-size: 1.2rem; }
-.hero { display: grid; grid-template-columns: 1.4fr 1fr; align-items: center; gap: 1rem; }
-.gauge {
-  aspect-ratio: 1.35; display: grid; place-content: center; text-align: center;
-  border-radius: 12rem 12rem 1.2rem 1.2rem;
-  background: conic-gradient(from 270deg at 50% 100%, var(--accent) 0 var(--progress), var(--border) 0 100%);
-  box-shadow: inset 0 -2.7rem 0 2rem var(--bg);
+.progress-card {
+  padding: 1.1rem; overflow: hidden; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 1.15rem;
+  box-shadow: 0 .7rem 1.8rem color-mix(in srgb, var(--text) 8%, transparent);
 }
-.gauge strong { font-size: 1.8rem; }
-.gauge span, .night-stat span, .night-stat small { color: var(--muted); }
-.night-stat { display: grid; gap: .3rem; }
-.night-stat strong { font-size: 1.5rem; }
+.progress-heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.progress-heading h1 { margin: 0; font-size: 1.35rem; }
+.progress-info {
+  display: grid; place-items: center; width: 1.8rem; height: 1.8rem;
+  border: 2px solid var(--muted); border-radius: 50%; color: var(--muted);
+  font-size: .85rem; font-weight: 800;
+}
+.progress-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(9.5rem, 1fr);
+  align-items: center; gap: 1rem; margin-top: .75rem;
+}
+.progress-visual { position: relative; min-width: 0; }
+.progress-visual svg { display: block; width: 100%; height: auto; overflow: visible; }
+.progress-track, .progress-arc {
+  fill: none; stroke-width: 18; stroke-linecap: round;
+}
+.progress-track { stroke: var(--border); }
+.progress-track-night, .progress-arc-night { stroke-width: 14; }
+.progress-arc {
+  stroke-dasharray: var(--total-progress) 100; stroke: var(--accent);
+}
+.progress-arc-night {
+  stroke-dasharray: var(--night-progress) 100;
+  stroke: color-mix(in srgb, var(--accent) 68%, #08162b);
+}
+.progress-percent {
+  position: absolute; left: 50%; bottom: 10%; display: grid;
+  justify-items: center; transform: translateX(-50%); line-height: 1;
+}
+.progress-percent strong { font-size: clamp(1.5rem, 7vw, 2.4rem); }
+.progress-percent span {
+  margin-top: .3rem; color: var(--muted); font-size: .72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.progress-details { display: grid; gap: 1rem; }
+.progress-details article {
+  display: grid; grid-template-columns: 2rem 1fr; align-items: center; gap: .65rem;
+}
+.progress-details p {
+  display: flex; align-items: baseline; gap: .15rem; margin: 0; white-space: nowrap;
+}
+.progress-details strong { font-size: 1.2rem; }
+.progress-details small, .progress-details div > span { color: var(--muted); }
+.progress-details div > span { font-size: .78rem; }
+.progress-icon {
+  display: grid; place-items: center; width: 2rem; height: 2rem;
+  border-radius: .65rem; color: var(--accent); font-size: 1.1rem;
+}
+.progress-icon-total { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.progress-icon-night {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 68%, #08162b);
+}
+.progress-icon-night {
+  border-radius: 50%;
+}
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin: 1.2rem 0; }
 .stats article, .detail-card, .drive-row, .warning-card, .live-clock {
   background: var(--panel); border: 1px solid var(--border); border-radius: 1rem; padding: 1rem;
@@ -91,8 +143,12 @@ fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; border: 1p
 .live-clock strong { font-variant-numeric: tabular-nums; font-size: clamp(2.5rem, 14vw, 5rem); }
 .live-clock small, .live-clock span { color: var(--muted); }
 @media (max-width: 360px) {
-  .hero { grid-template-columns: 1fr; }
-  .gauge { max-height: 11rem; }
+  .progress-layout { grid-template-columns: 1fr; gap: .4rem; }
+  .progress-details { grid-template-columns: 1fr 1fr; gap: .6rem; }
+  .progress-details article { grid-template-columns: 1.7rem 1fr; gap: .4rem; }
+  .progress-icon { width: 1.7rem; height: 1.7rem; }
+  .progress-details strong { font-size: 1rem; }
+  .progress-details small { font-size: .7rem; }
   .two-column { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
