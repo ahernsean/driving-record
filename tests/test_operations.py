@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import shutil
 import tempfile
+import time
 import unittest
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -13,6 +19,7 @@ from driving_log.db import Database
 from driving_log.operations import (
     apply_retention,
     install_user_units,
+    process_restore_request,
     replicate_archive,
     service_snapshot,
     tailscale_snapshot,
@@ -127,6 +134,40 @@ class OperationTests(unittest.TestCase):
             self.assertEqual(main(["archive", "replicate"]), 0)
             self.assertEqual(main(["live", "status"]), 0)
             self.assertEqual(main(["imports", "status"]), 0)
+
+    def test_signed_restore_request_restores_and_records_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_path = root / "state" / "driving.sqlite3"
+            database = Database(database_path)
+            database.initialize()
+            archive = create_archive(database, root / "archives")
+            operation_id = str(uuid.uuid4())
+            operation_dir = root / "restore-requests" / operation_id
+            operation_dir.mkdir(parents=True)
+            copied = operation_dir / archive.name
+            shutil.copy2(archive, copied)
+            payload: dict[str, object] = {
+                "archive_path": str(copied.resolve()),
+                "archive_sha256": verify_archive(copied)["archive_sha256"],
+                "not_before": time.time() - 1,
+            }
+            canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            payload["signature"] = hmac.new(
+                b"restore-secret", canonical, hashlib.sha256
+            ).hexdigest()
+            (operation_dir / "request.json").write_text(json.dumps(payload))
+
+            result_path = process_restore_request(
+                operation_id,
+                root / "restore-requests",
+                database_path,
+                "restore-secret",
+            )
+
+            result = json.loads(result_path.read_text())
+            self.assertEqual(result["status"], "completed")
+            self.assertTrue(Path(result["quarantine"]).is_dir())
 
 
 if __name__ == "__main__":
