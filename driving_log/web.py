@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData, UploadFile
+from starlette.middleware.base import RequestResponseEndpoint
 
 from driving_log.archive import create_archive
 from driving_log.config import Settings
@@ -122,6 +123,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     asset_version = asset_digest.hexdigest()[:12]
     records = RecordService(database)
     live = LiveDriveService(database)
+
+    @app.middleware("http")
+    async def prevent_stale_html(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     def token(action: str) -> str:
         return create_form_token(settings.form_secret, action)

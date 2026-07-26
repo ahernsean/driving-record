@@ -52,6 +52,7 @@ class WebTests(unittest.TestCase):
             ):
                 dashboard = await client.get("/")
                 self.assertEqual(dashboard.status_code, 200)
+                self.assertEqual(dashboard.headers["cache-control"], "no-store")
                 self.assertIn("Start a drive", dashboard.text)
                 self.assertNotIn("login", dashboard.text.lower())
                 self.assertRegex(
