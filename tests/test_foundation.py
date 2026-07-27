@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 import anyio
@@ -260,6 +261,46 @@ class ApplicationTests(unittest.TestCase):
                 self.assertEqual(main(["archive", "list"]), 0)
                 self.assertEqual(main(["archive", "verify"]), 0)
                 self.assertEqual(main(["imports", "status"]), 0)
+            finally:
+                if prior is None:
+                    del os.environ["DRIVING_LOG_STATE_DIR"]
+                else:
+                    os.environ["DRIVING_LOG_STATE_DIR"] = prior
+
+    def test_cli_seed_csv_and_archive_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            prior = os.environ.get("DRIVING_LOG_STATE_DIR")
+            os.environ["DRIVING_LOG_STATE_DIR"] = temporary
+            root = Path(temporary)
+            pdf = root / "seed.pdf"
+            log = root / "log.txt"
+            csv_input = root / "input.csv"
+            pdf.write_bytes(b"pdf")
+            log.write_text("log")
+            csv_input.write_bytes(b"csv")
+            try:
+                with mock.patch("driving_log.cli.preview_seed", return_value={"rows": 0}):
+                    self.assertEqual(
+                        main(["seed", "--preview", "--pdf", str(pdf), "--log", str(log)]),
+                        0,
+                    )
+                with mock.patch("driving_log.cli.apply_seed", return_value={"created": 0}):
+                    self.assertEqual(main(["seed", "--pdf", str(pdf), "--log", str(log)]), 0)
+                exported = root / "export.csv"
+                with mock.patch("driving_log.cli.export_csv", return_value=b"header\n"):
+                    self.assertEqual(main(["csv", "export", "--out", str(exported)]), 0)
+                with mock.patch("driving_log.cli.import_csv", return_value={"created": 0}):
+                    self.assertEqual(main(["csv", "import", "--in", str(csv_input)]), 0)
+                archive = root / "explicit.tar.gz"
+                self.assertEqual(main(["archive", "create", "--out", str(archive)]), 0)
+                self.assertEqual(main(["archive", "verify", str(archive)]), 0)
+                with mock.patch(
+                    "driving_log.cli.restore_archive", return_value=root / "quarantine"
+                ):
+                    self.assertEqual(
+                        main(["archive", "restore", str(archive), "--confirm"]),
+                        0,
+                    )
             finally:
                 if prior is None:
                     del os.environ["DRIVING_LOG_STATE_DIR"]
