@@ -54,7 +54,6 @@ packages = ["driving_log"]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
 markers = [
-  "browser: requires a locally installed Playwright browser",
   "security: validates a security boundary or hostile input",
 ]
 
@@ -63,5 +62,5 @@ branch = true
 source = ["driving_log"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 95
 show_missing = true
