@@ -167,7 +167,7 @@ class RecordTests(ServiceCase):
         self.assertEqual(self.service.warnings_for(second["id"]), [])
 
     def test_retry_stale_delete_missing_reverse_and_midnight_guards(self) -> None:
-        with self.assertRaisesRegex(ValueError, "duration must be positive"):
+        with self.assertRaisesRegex(ValueError, "positive duration"):
             self.service.create(self.drive(minutes=-1))
         with self.assertRaisesRegex(NotFoundError, "drive not found"):
             self.service.get(str(uuid.uuid4()))
