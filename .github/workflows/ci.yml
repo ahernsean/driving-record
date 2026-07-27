@@ -24,7 +24,7 @@ jobs:
 
   rocky-sqlite:
     runs-on: ubuntu-latest
-    container: rockylinux:9.8
+    container: rockylinux/rockylinux:9
     steps:
       - uses: actions/checkout@v4
       - run: dnf install -y epel-release
