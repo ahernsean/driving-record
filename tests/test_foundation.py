@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import UTC, date, datetime, timedelta
@@ -16,7 +17,7 @@ from driving_log.cli import doctor, main
 from driving_log.config import Settings
 from driving_log.db import BUSY_TIMEOUT_MS, Database, MigrationMismatchError, SchemaTooNewError
 from driving_log.logging_config import JsonFormatter
-from driving_log.migrations import LATEST_SCHEMA_VERSION
+from driving_log.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS, SCHEMA_V1
 from driving_log.solar import (
     AmbiguousLocalTimeError,
     LocalTimeError,
@@ -55,6 +56,58 @@ class DatabaseTests(unittest.TestCase):
             sidecar = self.path.with_name(f"{self.path.name}{suffix}")
             if sidecar.exists():
                 self.assertEqual(sidecar.stat().st_mode & 0o777, 0o600)
+
+    def test_migrates_v1_drives_with_blank_end_locations(self) -> None:
+        self.path.parent.mkdir(parents=True)
+        connection = sqlite3.connect(self.path)
+        connection.executescript(SCHEMA_V1)
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (1, ?, ?, 'now')",
+            (MIGRATIONS[0].name, MIGRATIONS[0].checksum),
+        )
+        connection.execute(
+            """
+            INSERT INTO drives (
+              id, driver_name, started_at_utc, ended_at_utc, timezone_name,
+              started_utc_offset_minutes, ended_utc_offset_minutes, duration_minutes,
+              day_minutes, night_minutes, solar_calculation_version, solar_latitude,
+              solar_longitude, tzdata_version, road_type, source, created_at, updated_at
+            ) VALUES (
+              'drive', 'Daniel Ahern', '2026-07-20T16:00:00Z',
+              '2026-07-20T16:30:00Z', 'America/New_York', -240, -240, 30, 30, 0,
+              'apex-v1', 35.73, -78.85, 'test', 'local', 'manual', 'now', 'now'
+            )
+            """
+        )
+        connection.commit()
+        connection.close()
+
+        archive_dir = Path(self.temp.name) / "custom-archives"
+        database = Database(self.path, archive_dir)
+        database.initialize()
+        pre_migration = list(archive_dir.glob("driving-log-pre-migration-v1-*.tar.gz"))
+        self.assertEqual(len(pre_migration), 1)
+        self.assertFalse((self.path.parent / "archives").exists())
+        upgraded = database.connect()
+        self.assertEqual(
+            upgraded.execute("SELECT end_location FROM drives WHERE id='drive'").fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0],
+            LATEST_SCHEMA_VERSION,
+        )
+        upgraded.close()
 
     def test_refuses_schema_newer_than_application(self) -> None:
         database = Database(self.path)

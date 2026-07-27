@@ -114,6 +114,7 @@ h2 { font-size: 1.2rem; }
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 .drive-list { display: grid; gap: .7rem; }
 .drive-row { display: grid; gap: .25rem; color: var(--text); text-decoration: none; }
+.drive-row .drive-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drive-row small { color: var(--muted); }
 .drive-row em { color: #d97706; font-style: normal; font-weight: 700; }
 .stacked-form { display: grid; gap: 1rem; }

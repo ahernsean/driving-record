@@ -20,6 +20,9 @@
     <label>Weather
       <input name="weather" value="{{ drive.weather if drive else '' }}">
     </label>
+    <label>End location
+      <input name="end_location" value="{{ drive.end_location if drive else '' }}" placeholder="For example, Apex Friendship High School">
+    </label>
     <label>Notes
       <textarea name="notes" rows="3">{{ drive.notes if drive else '' }}</textarea>
     </label>

@@ -8,7 +8,7 @@
     {% for item in drives %}
       <a class="drive-row" href="/drives/{{ item.row.id }}">
         <strong>{{ format_local_datetime(item.row.started_at_utc) }}</strong>
-        <span>{{ format_minutes(item.row.duration_minutes) }} · {{ item.row.road_type }}</span>
+        <span class="drive-summary">{{ format_minutes(item.row.duration_minutes) }} · {{ item.row.road_type }}{% if item.row.end_location %} · {{ item.row.end_location }}{% endif %}</span>
         <small>{{ format_minutes(item.row.day_minutes) }} day · {{ format_minutes(item.row.night_minutes) }} night</small>
         {% if item.warnings %}<em>{{ item.warnings | length }} warning{{ "s" if item.warnings|length != 1 }}</em>{% endif %}
       </a>

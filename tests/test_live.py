@@ -86,15 +86,18 @@ class LiveDriveTests(unittest.TestCase):
             request_id=final_request,
             road_type="mixed",
             weather="rain",
+            end_location="Apex Friendship High School",
         )
         retry = self.service.finalize(
             live["id"],
             request_id=final_request,
             road_type="mixed",
             weather="rain",
+            end_location="Apex Friendship High School",
         )
         self.assertEqual(drive["id"], retry["id"])
         self.assertEqual(drive["duration_minutes"], 42)
+        self.assertEqual(drive["end_location"], "Apex Friendship High School")
         self.assertEqual(len(RecordService(self.database).list_drives()), 1)
         with self.assertRaises(ConflictError):
             self.service.finalize(

@@ -8,6 +8,7 @@
     <div><span>Day / night</span><strong>{{ format_minutes(drive.day_minutes) }} / {{ format_minutes(drive.night_minutes) }}</strong></div>
     <div><span>Road</span><strong>{{ drive.road_type }}</strong></div>
     <div><span>Weather</span><strong>{{ drive.weather or "—" }}</strong></div>
+    <div><span>End location</span><strong>{{ drive.end_location or "—" }}</strong></div>
     <div><span>Supervisor</span><strong>{{ drive.supervisor_name or "Missing" }}</strong></div>
     <div><span>Source</span><strong>{{ drive.source }}</strong></div>
   </section>

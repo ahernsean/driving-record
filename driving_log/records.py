@@ -40,6 +40,7 @@ class DriveInput:
     road_type: str = "unknown"
     weather: str = ""
     notes: str = ""
+    end_location: str = ""
     source: str = "manual"
     source_reference: str | None = None
     import_batch_id: str | None = None
@@ -108,6 +109,7 @@ def _drive_values(
         "road_type": payload["road_type"],
         "weather": value.weather.strip(),
         "notes": value.notes.strip(),
+        "end_location": value.end_location.strip(),
         "source": value.source,
         "source_reference": value.source_reference,
         "import_batch_id": value.import_batch_id,
@@ -122,15 +124,16 @@ INSERT INTO drives (
  supervisor_dl_number, supervisor_dl_state, started_at_utc, ended_at_utc, timezone_name,
  started_utc_offset_minutes, ended_utc_offset_minutes, duration_minutes, day_minutes,
  night_minutes, solar_calculation_version, solar_latitude, solar_longitude, tzdata_version,
- road_type, weather, notes, source, source_reference, import_batch_id, created_at, updated_at
+ road_type, weather, notes, end_location, source, source_reference, import_batch_id,
+ created_at, updated_at
 ) VALUES (
  :id, :request_id, :request_payload_hash, :live_drive_id, :driver_name,
  :supervisor_name, :supervisor_dl_number, :supervisor_dl_state, :started_at_utc,
  :ended_at_utc, :timezone_name, :started_utc_offset_minutes,
  :ended_utc_offset_minutes, :duration_minutes, :day_minutes, :night_minutes,
  :solar_calculation_version, :solar_latitude, :solar_longitude, :tzdata_version,
- :road_type, :weather, :notes, :source, :source_reference, :import_batch_id,
- :created_at, :updated_at
+ :road_type, :weather, :notes, :end_location, :source, :source_reference,
+ :import_batch_id, :created_at, :updated_at
 )
 """
 
@@ -246,7 +249,8 @@ class RecordService:
                   solar_calculation_version=:solar_calculation_version,
                   solar_latitude=:solar_latitude, solar_longitude=:solar_longitude,
                   tzdata_version=:tzdata_version, road_type=:road_type,
-                  weather=:weather, notes=:notes, updated_at=:updated_at,
+                  weather=:weather, notes=:notes, end_location=:end_location,
+                  updated_at=:updated_at,
                   version=version+1
                 WHERE id=:id AND version=:expected_version
                 """,

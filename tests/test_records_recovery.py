@@ -27,7 +27,7 @@ from driving_log.archive import (
     restore_archive,
     verify_archive,
 )
-from driving_log.csv_backup import CSV_COLUMNS, export_csv, import_csv
+from driving_log.csv_backup import CSV_COLUMNS, LEGACY_CSV_COLUMNS, export_csv, import_csv
 from driving_log.db import Database
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.seed import (
@@ -228,7 +228,10 @@ class RecordTests(ServiceCase):
 
 class CsvTests(ServiceCase):
     def test_round_trip_and_duplicate_file_are_idempotent(self) -> None:
-        first = self.service.create(self.drive(), request_id=str(uuid.uuid4()))
+        first = self.service.create(
+            self.drive(end_location="Apex Friendship High School"),
+            request_id=str(uuid.uuid4()),
+        )
         content = export_csv(self.database)
         other_path = Path(self.temporary.name) / "other.sqlite3"
         other = Database(other_path)
@@ -237,7 +240,41 @@ class CsvTests(ServiceCase):
         self.assertEqual(summary["created"], 1)
         self.assertEqual(import_csv(other, content, "backup.csv"), summary)
         self.assertEqual(RecordService(other).list_drives()[0]["id"], first["id"])
+        self.assertEqual(
+            RecordService(other).list_drives()[0]["end_location"],
+            "Apex Friendship High School",
+        )
         self.assertEqual(export_csv(other), content)
+
+    def test_imports_legacy_csv_without_an_end_location(self) -> None:
+        self.service.create(self.drive(end_location="Home"))
+        current = list(csv.DictReader(io.StringIO(export_csv(self.database).decode())))[0]
+        legacy = {column: current[column] for column in LEGACY_CSV_COLUMNS}
+        legacy["format_version"] = "1"
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=LEGACY_CSV_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerow(legacy)
+        content = output.getvalue().encode()
+        summary = import_csv(self.database, content, "legacy.csv")
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(summary["warnings"], 1)
+        audit = self.database.connect_readonly()
+        batch = audit.execute(
+            "SELECT format_version FROM import_batches WHERE id=?",
+            (summary["batch_id"],),
+        ).fetchone()
+        row = audit.execute(
+            "SELECT error_message FROM import_rows WHERE import_batch_id=?",
+            (summary["batch_id"],),
+        ).fetchone()
+        audit.close()
+        self.assertEqual(batch["format_version"], "1")
+        self.assertIn("not compared", row["error_message"])
+        other = Database(Path(self.temporary.name) / "legacy.sqlite3")
+        other.initialize()
+        import_csv(other, content, "legacy.csv")
+        self.assertEqual(RecordService(other).list_drives()[0]["end_location"], "")
 
     def test_rejects_duplicate_ids_before_mutation(self) -> None:
         self.service.create(self.drive())
@@ -291,12 +328,12 @@ class CsvTests(ServiceCase):
         invalid_version = io.StringIO(newline="")
         writer = csv.DictWriter(invalid_version, fieldnames=CSV_COLUMNS, lineterminator="\n")
         writer.writeheader()
-        rows[0]["format_version"] = "2"
+        rows[0]["format_version"] = "999"
         writer.writerows(rows)
         with self.assertRaisesRegex(ValueError, "unsupported format"):
             import_csv(self.database, invalid_version.getvalue().encode(), "version.csv")
 
-        rows[0]["format_version"] = "1"
+        rows[0]["format_version"] = "2"
         rows[0]["started_at_utc"] = "not-a-date"
         invalid_date = io.StringIO(newline="")
         writer = csv.DictWriter(invalid_date, fieldnames=CSV_COLUMNS, lineterminator="\n")
