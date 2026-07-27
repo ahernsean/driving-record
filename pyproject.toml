@@ -54,6 +54,7 @@ packages = ["driving_log"]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
 markers = [
+  "browser: Playwright browser tests",
   "security: validates a security boundary or hostile input",
 ]
 
