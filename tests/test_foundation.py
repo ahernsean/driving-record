@@ -257,6 +257,10 @@ class ApplicationTests(unittest.TestCase):
                 Database(Path(temporary) / "driving-log.sqlite3").initialize()
                 self.assertEqual(main(["doctor", "--json"]), 0)
                 self.assertEqual(main(["db", "check"]), 0)
+                self.assertEqual(main(["archive", "create"]), 0)
+                self.assertEqual(main(["archive", "list"]), 0)
+                self.assertEqual(main(["archive", "verify"]), 0)
+                self.assertEqual(main(["imports", "status"]), 0)
             finally:
                 if prior is None:
                     del os.environ["DRIVING_LOG_STATE_DIR"]

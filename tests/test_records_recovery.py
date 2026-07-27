@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from driving_log.archive import (
     ARCHIVE_FORMAT,
     application_lock,
@@ -194,6 +196,7 @@ class CsvTests(ServiceCase):
 
 
 class ArchiveTests(ServiceCase):
+    @pytest.mark.security
     def test_archive_verifies_and_restore_preserves_full_state(self) -> None:
         drive = self.service.create(self.drive())
         with self.database.transaction() as connection:
@@ -210,6 +213,7 @@ class ArchiveTests(ServiceCase):
         restored.database.initialize()
         self.assertIsNone(restored.get(drive["id"])["deleted_at"])
 
+    @pytest.mark.security
     def test_restore_requires_confirmation_and_hash_is_checked(self) -> None:
         archive = create_archive(self.database, Path(self.temporary.name) / "archives")
         with self.assertRaisesRegex(ValueError, "confirmation"):
@@ -234,6 +238,7 @@ class ArchiveTests(ServiceCase):
         with self.assertRaises(FileExistsError):
             create_archive(self.database, target.parent, target)
 
+    @pytest.mark.security
     def test_archive_rejects_hash_valid_but_empty_database(self) -> None:
         root = Path(self.temporary.name)
         empty = root / "empty.sqlite3"

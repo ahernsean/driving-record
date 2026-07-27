@@ -53,6 +53,9 @@ packages = ["driving_log"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
+markers = [
+  "security: security and recovery boundary tests",
+]
 
 [tool.coverage.run]
 branch = true
