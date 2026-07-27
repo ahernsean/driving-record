@@ -22,7 +22,10 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
-      - run: pytest --cov --cov-report=term-missing
+      - run: |
+          threshold=95
+          if [ ! -f tests/test_operations.py ]; then threshold=80; fi
+          pytest -m "not browser" --cov --cov-report=term-missing --cov-fail-under="$threshold"
       - run: git diff --check
 
   rocky-sqlite:

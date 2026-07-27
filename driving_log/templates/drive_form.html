@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>{{ title }}</h1>
+  <form class="stacked-form" method="post" action="{{ action }}" data-async-submit>
+    <input type="hidden" name="request_id" value="{{ '10000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+    {% if drive %}<input type="hidden" name="version" value="{{ drive.version }}">{% endif %}
+    {% include "_time_editor.html" %}
+    <label>Driver
+      <input required name="driver_name" value="{{ drive.driver_name if drive else 'Daniel Ahern' }}">
+    </label>
+    <label>Supervising driver
+      <input name="supervisor_name" value="{{ drive.supervisor_name if drive and drive.supervisor_name else 'Sean Ahern' }}">
+    </label>
+    <fieldset>
+      <legend>Road type</legend>
+      {% for kind in ("local", "highway", "mixed", "unknown") %}
+        <label class="choice"><input type="radio" name="road_type" value="{{ kind }}" {{ "checked" if (drive and drive.road_type == kind) or (not drive and kind == "unknown") }}> {{ kind | title }}</label>
+      {% endfor %}
+    </fieldset>
+    <label>Weather
+      <input name="weather" value="{{ drive.weather if drive else '' }}">
+    </label>
+    <label>Notes
+      <textarea name="notes" rows="3">{{ drive.notes if drive else '' }}</textarea>
+    </label>
+    <button class="primary" type="submit">Save drive</button>
+  </form>
+{% endblock %}

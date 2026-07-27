@@ -558,16 +558,14 @@ Fields:
 - end time
 - large `Ends next day` control that advances the end date by one day
 - supervisor name
-- supervisor DL number
-- supervisor DL state
 - road type
 - weather
 - notes
 
-Supervisor DL number and state are configuration-backed defaults, but must
-remain optional until the family's license details are available. The UI should
-identify missing supervisor-license details before generating the DMV-facing
-report rather than blocking ordinary drive entry.
+Supervisor DL number and state remain nullable and are deliberately omitted
+from ordinary drive entry. A later DMV export mapping will associate the
+entered supervisor name with license details and warn if that mapping is
+missing.
 
 On submit:
 
@@ -585,7 +583,6 @@ The edit form reuses the large manual-entry controls and allows correction of:
 - start time
 - end time
 - supervisor name
-- supervisor DL number and state
 - road type
 - weather
 - notes
@@ -831,12 +828,12 @@ CLI restoration runs directly while the web service is stopped. Web restoration
 uses an external user-systemd helper so the request is not responsible for
 stopping and restarting its own process:
 
-1. The authenticated web process uploads an archive into a UUID-named restore
+1. The web process uploads an archive into a UUID-named restore
    request directory and verifies it without changing live state.
-2. After recent reauthentication and explicit confirmation, it atomically
-   writes an HMAC-signed request manifest containing the operation ID, expected
-   archive hash, and `not_before` time. The signing key is in the mode-`0600`
-   service environment file, not the database or archive.
+2. After explicit confirmation, it atomically writes an HMAC-signed request
+   manifest containing the operation ID, expected archive hash, and bounded
+   execution window. The signing key is in the mode-`0600` service environment
+   file, not the database or archive.
 3. It starts `driving-log-restore@OPERATION_ID.service` and returns HTTP 202 with
    the operation ID. The signed request manifest contains a short `not_before`
    time so the helper cannot stop the web service until the response has had
@@ -922,7 +919,7 @@ Constraints:
 
 Recommended runtime:
 
-- bind the app locally on a non-80 port such as `127.0.0.1:8765`
+- bind the app locally on `127.0.0.1:8766`
 - expose it through Tailscale Serve or an equivalent forwarding rule
 - keep the internal app port configurable
 - keep all mutable state outside the Git worktree at
@@ -1064,31 +1061,32 @@ storage logic.
 
 ## Security / Access
 
-Primary audience is the household, but the application can mutate an
-authoritative record and expose supervisor license numbers. Network membership
-alone is not sufficient authorization.
+Primary audience is the household. The deployment deliberately uses tailnet
+membership and tailnet policy as its authorization boundary, matching the
+existing Wordle service. This is an explicit low-threat household trade-off,
+not a general-purpose internet deployment posture.
 
 Required controls:
 
-- bind only to localhost and expose only through Tailscale Serve over HTTPS
-- require an application login using a high-entropy household secret stored in
-  a mode-`0600` environment file outside the repo and database
-- rate-limit failed login attempts
-- issue `Secure`, `HttpOnly`, `SameSite=Strict` session cookies
-- generate a per-session CSRF token and validate it on every state-changing
-  request
-- reject mutation requests whose `Origin` and `Host` do not match the configured
-  public Tailscale URL
+- bind only to localhost and expose only through Tailscale Serve
+- accept tailnet-only HTTP because Tailscale encrypts node-to-node transport
+- do not enable Funnel or bind the application to a LAN or tailnet interface
+- do not add an application login, authentication cookie, Origin/Host allowlist,
+  or CSRF layer
 - use POST for mutations and never mutate state from GET requests
-- require recent reauthentication for archive restore
+- use stable request IDs and state/version checks to make duplicate taps,
+  retries, and stale pages safe; these are correctness controls, not
+  authentication
+- keep active-drive ownership in SQLite rather than a browser session,
+  address, or identity header
+- accept Tailscale identity headers only as optional audit metadata
+- require an HMAC-signed, expiring, one-use helper request for archive restore
 - return archive and CSV downloads with `Cache-Control: no-store` and attachment
   disposition
-- never place credentials, session tokens, CSRF tokens, or supervisor license
-  numbers in URLs or logs
+- never place operation secrets or supervisor license numbers in URLs or logs
 
-Opening a new browser session may require application login again, but after
-authentication the active or ending drive is recovered from SQLite; session
-identity never owns the drive.
+Opening a new browser session displays the dashboard immediately and recovers
+any active or ending drive from SQLite.
 
 For the Microsoft-form ingestion path, credentials should live outside the repo
 in environment variables or a local config file excluded from version control.
@@ -1176,11 +1174,11 @@ Playwright WebKit runs at representative iPhone viewport sizes and verifies:
 - native `color-scheme` and browser `theme-color` update with the page palette
 - dashboard gauge and night total without horizontal scrolling
 - minimum touch-target sizing and readable entry controls
-- manual entry validation and warning acknowledgement
+- manual entry validation and warning display
 - drive listing, details, editing, concurrent-edit conflict, deletion, CSV
   download/upload, and archive controls
-- login, cookie flags, CSRF rejection, Origin/Host rejection, and restore
-  reauthentication
+- tailnet HTTP operation without application login and one-use signed restore
+  requests
 - start, elapsed display, durable ending state, resume, finalization, cancel,
   double-tap, and refresh behavior
 - fixed local start-time display and drift-free `H:MM:SS` duration updates
@@ -1248,7 +1246,7 @@ These should be handled explicitly during implementation:
   retention
 - day/night computation
 - warnings engine
-- application authentication, session security, and CSRF protection
+- loopback-only serving, retry-safe mutations, and signed restore requests
 - unit and SQLite recovery tests
 
 ### Phase 2
@@ -1283,7 +1281,7 @@ These should be handled explicitly during implementation:
   same 15-minute sunrise/sunset offsets as drive classification.
 - Live display: show local start time and `H:MM:SS` duration, projected
   client-side between server synchronization events with no per-second requests.
-- Web access: Tailscale HTTPS plus mandatory application authentication and
-  CSRF protection.
+- Web access: tailnet-only HTTP through Tailscale Serve, with no application
+  login; tailnet policy is the authorization boundary.
 - External archive destination: not yet selected; deployment must configure one
   or explicitly acknowledge same-disk-only disaster recovery.

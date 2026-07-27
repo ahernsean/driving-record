@@ -1,0 +1,21 @@
+<section class="time-editor" data-time-editor>
+  <label>Start time
+    <input required type="datetime-local" name="started_at_local" value="{{ start_local }}" data-time-start>
+  </label>
+  <label>End time
+    <input required type="datetime-local" name="ended_at_local" value="{{ end_local }}" data-time-end>
+  </label>
+  <div class="time-duration">
+    <span class="time-label">Duration</span>
+    <div class="duration-editor">
+      <label class="duration-part">
+        <input required type="number" min="0" max="99" inputmode="numeric" value="{{ duration_hours }}" aria-label="Duration hours" data-duration-hours>
+        <span>h</span>
+      </label>
+      <label class="duration-part">
+        <input required type="number" min="0" max="59" inputmode="numeric" value="{{ duration_remainder }}" aria-label="Duration minutes" data-duration-minutes>
+        <span>m</span>
+      </label>
+    </div>
+  </div>
+</section>
