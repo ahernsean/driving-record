@@ -6,6 +6,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  PYTHONPATH: .
+
 jobs:
   quality-unit:
     runs-on: ubuntu-latest
@@ -27,6 +30,7 @@ jobs:
     container: rockylinux/rockylinux:9
     steps:
       - uses: actions/checkout@v4
+      - run: dnf install -y epel-release
       - run: dnf install -y python3.13 python3.13-pip sqlite
       - run: python3.13 -m pip install --require-hashes -r requirements.lock
       - run: python3.13 -m pip install --require-hashes -r requirements-test.lock
