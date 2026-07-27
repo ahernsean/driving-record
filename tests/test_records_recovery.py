@@ -329,6 +329,7 @@ class CsvTests(ServiceCase):
 
 
 class ArchiveTests(ServiceCase):
+    @pytest.mark.security
     def test_archive_verifies_and_restore_preserves_full_state(self) -> None:
         drive = self.service.create(self.drive())
         with self.database.transaction() as connection:
@@ -370,6 +371,7 @@ class ArchiveTests(ServiceCase):
         with self.assertRaises(FileExistsError):
             create_archive(self.database, target.parent, target)
 
+    @pytest.mark.security
     def test_archive_rejects_hash_valid_but_empty_database(self) -> None:
         root = Path(self.temporary.name)
         empty = root / "empty.sqlite3"
