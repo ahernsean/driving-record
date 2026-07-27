@@ -30,8 +30,9 @@ def utc_now_text() -> str:
 
 
 class Database:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, archive_dir: Path | None = None):
         self.path = path
+        self.archive_dir = archive_dir or path.parent / "archives"
         self.ready = False
         self.read_only_reason: str | None = None
 
@@ -59,6 +60,18 @@ class Database:
             if path.exists():
                 os.chmod(path, 0o600)
 
+    def connect_readonly(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            f"file:{self.path}?mode=ro",
+            uri=True,
+            timeout=BUSY_TIMEOUT_MS / 1000,
+            isolation_level=None,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+        return connection
+
     def initialize(self) -> None:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.path.parent.chmod(0o700)
@@ -66,6 +79,18 @@ class Database:
         connection = self.connect()
         try:
             self._check_integrity(connection)
+            current = self._current_schema_version(connection)
+            if existed and 0 < current < LATEST_SCHEMA_VERSION:
+                connection.close()
+                from driving_log.archive import create_archive
+
+                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+                create_archive(
+                    self,
+                    self.archive_dir,
+                    self.archive_dir / f"driving-log-pre-migration-v{current}-{stamp}.tar.gz",
+                )
+                connection = self.connect()
             self._apply_migrations(connection)
             self._check_integrity(connection)
             self._verify_migrations(connection)
@@ -79,6 +104,40 @@ class Database:
             connection.close()
         if not existed:
             os.chmod(self.path, 0o600)
+
+    def check_existing(self) -> None:
+        if not self.path.exists():
+            raise DatabaseError(f"database does not exist: {self.path}")
+        connection = self.connect_readonly()
+        try:
+            self._check_integrity(connection)
+            current = self._current_schema_version(connection)
+            if current != LATEST_SCHEMA_VERSION:
+                raise DatabaseError(
+                    f"database schema {current} requires migration; doctor is read-only"
+                )
+            self._verify_migrations(connection)
+            self.ready = True
+            self.read_only_reason = None
+        except Exception as exc:
+            self.ready = False
+            self.read_only_reason = str(exc)
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _current_schema_version(connection: sqlite3.Connection) -> int:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone()
+        if not table:
+            return 0
+        return int(
+            connection.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+            ).fetchone()[0]
+        )
 
     @staticmethod
     def _check_integrity(connection: sqlite3.Connection) -> None:
@@ -169,12 +228,12 @@ class Database:
             version = connection.execute(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
             ).fetchone()[0]
-            writable = connection.execute(
-                "SELECT CASE WHEN sqlite_compileoption_used('OMIT_AUTOINIT') THEN 1 ELSE 1 END"
-            ).fetchone()[0]
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("UPDATE configuration SET updated_at=updated_at WHERE 0")
+            connection.execute("ROLLBACK")
             connection.close()
             return {
-                "ready": quick_check == "ok" and version == LATEST_SCHEMA_VERSION and writable == 1,
+                "ready": quick_check == "ok" and version == LATEST_SCHEMA_VERSION,
                 "quick_check": quick_check,
                 "schema_version": version,
             }
