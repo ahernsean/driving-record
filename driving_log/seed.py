@@ -194,12 +194,6 @@ def parse_log_text(text: str, source_name: str) -> list[SeedCandidate]:
             warnings.append(end_warning)
         if written_duration is None and local_end is not None:
             written_duration = round((local_end - local_start).total_seconds() / 60)
-            warnings.append(
-                (
-                    "seed_ambiguous_duration",
-                    "Duration was inferred from the written start and end timestamps",
-                )
-            )
         if written_duration is None:
             raise ValueError(f"log row has no usable duration: {line}")
         computed_end = (

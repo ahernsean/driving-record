@@ -167,8 +167,9 @@ Rules:
 
 ### 2. `drive_warnings`
 
-Stores non-fatal source-quality findings and warning acknowledgements that
-cannot be reconstructed from canonical drive fields.
+Stores actionable source-quality findings found during import. They are shown
+until the drive is reviewed and successfully saved, at which point its source
+warnings are deleted in the same transaction as the edit.
 
 Fields:
 
@@ -178,16 +179,16 @@ Fields:
 - `warning_message`
 - `created_at`
 
-Examples:
-
-- `seed_ambiguous_duration`
-- `seed_possible_duplicate`
-- `seed_day_night_mismatch`
-
 Intrinsic warnings such as long duration and crossing midnight, and relational
 warnings such as overlaps and weekly overage, are derived from the current
 non-deleted drive set. They must not be persisted as authoritative warning rows
 because imports and deletions can invalidate them.
+
+Ordinary parsing choices, such as calculating duration from explicit start and
+end timestamps, belong only to `import_rows` provenance. Actionable ambiguity
+or source conflict appears initially with a link to review and save the drive.
+Exact source duplicates use the derived overlap warning instead of a persisted
+source warning.
 
 ### 3. `live_drives`
 
@@ -333,7 +334,7 @@ For the PDF:
 - Resolve the start to a UTC instant using `America/New_York`, compute the end
   instant from duration, and recompute canonical day/night minutes from the
   Apex solar rule.
-- Preserve the source day/night value in `import_rows`; attach a
+- Preserve the source day/night value in `import_rows`; attach a reviewable
   `seed_day_night_mismatch` warning when it differs from the computed split.
 - Keep environment text as `road_type` when possible.
 - Store `Sean Ahern` as supervisor where present.
@@ -442,7 +443,7 @@ Allow save, but show prominent warnings when:
 - drive crosses midnight
 - drive overlaps another saved drive
 - the drive would cause its week's total to exceed 10 hours
-- imported row required inferred duration or other assumptions
+- imported data contains an ambiguity or conflicts with its canonical value
 
 ### Weekly cap handling
 
@@ -597,7 +598,8 @@ The edit form reuses the large manual-entry controls and allows correction of:
 
 Saving an edit occurs in one transaction. It validates the submitted record
 version, reruns hard validation, recomputes duration and day/night minutes, and
-updates the drive without changing its stable ID or provenance. The response
+updates the drive without changing its stable ID or provenance. It also clears
+the drive's reviewable import warnings. The response
 includes newly derived long-drive, midnight, overlap, and weekly-overage
 warnings. An `audit_events` row records the before and after values with private
 license data redacted. If another session edited the drive first, return a

@@ -24,7 +24,17 @@
     <div><span>Source</span><strong>{{ drive.source }}</strong></div>
   </section>
   {% if warnings %}
-    <section class="warning-card"><h2>Warnings</h2>{% for warning in warnings %}<p>{{ warning.message }}</p>{% endfor %}</section>
+    <section class="warning-card">
+      <h2>Warnings</h2>
+      {% for warning in warnings %}
+        <p>
+          {{ warning.message }}
+          {% if warning.action == "review_import" %}
+            <a href="/drives/{{ drive.id }}/edit">Review and save this drive to clear this import warning.</a>
+          {% endif %}
+        </p>
+      {% endfor %}
+    </section>
   {% endif %}
   <div class="actions">
     <a class="button" href="/drives/{{ drive.id }}/edit">Edit drive</a>

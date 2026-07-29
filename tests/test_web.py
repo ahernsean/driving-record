@@ -15,6 +15,7 @@ from pypdf import PdfReader
 
 from driving_log.app import create_app
 from driving_log.config import DEFAULT_TIMEZONE, Settings
+from driving_log.db import utc_now_text
 from driving_log.web import _format_local_datetime, _parse_local
 
 
@@ -72,6 +73,21 @@ class WebTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 303)
+                drive_id = response.headers["location"].rsplit("/", 1)[-1]
+                with self.app.state.database.transaction() as connection:
+                    connection.execute(
+                        "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                        (
+                            str(uuid.uuid4()),
+                            drive_id,
+                            "seed_ambiguous_duration",
+                            (
+                                "Written duration does not match start and end timestamps; "
+                                "duration was used"
+                            ),
+                            utc_now_text(),
+                        ),
+                    )
                 malformed = await client.post(
                     "/drives",
                     data={
@@ -91,6 +107,8 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Monday, Jul 20, 2026 at 12:30 PM EDT", detail.text)
                 self.assertNotIn("Started (UTC)", detail.text)
                 self.assertIn("Apex Friendship High School", detail.text)
+                self.assertIn("Written duration does not match", detail.text)
+                self.assertIn("Review and save this drive", detail.text)
                 listing = await client.get("/drives")
                 self.assertIn("Drive history", listing.text)
                 self.assertIn("local", listing.text)
@@ -151,6 +169,7 @@ class WebTests(unittest.TestCase):
                 updated_detail = await client.get(updated.headers["location"])
                 self.assertIn("45m", updated_detail.text)
                 self.assertIn("Home", updated_detail.text)
+                self.assertNotIn("Written duration does not match", updated_detail.text)
                 updated_version = re.search(r'name="version" value="(\d+)"', updated_detail.text)
                 self.assertIsNotNone(updated_version)
                 deleted = await client.post(

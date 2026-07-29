@@ -256,6 +256,7 @@ class RecordService:
                 """,
                 {**values, "expected_version": expected_version},
             )
+            connection.execute("DELETE FROM drive_warnings WHERE drive_id=?", (drive_id,))
             self.database.audit(
                 connection,
                 event_id=str(uuid.uuid4()),
@@ -423,6 +424,7 @@ class RecordService:
             connection.close()
 
         warnings: dict[str, list[dict[str, str]]] = {str(drive["id"]): [] for drive in drives}
+        current_drives = {str(drive["id"]): drive for drive in drives}
         intervals: dict[str, tuple[datetime, datetime]] = {}
         from zoneinfo import ZoneInfo
 
@@ -495,14 +497,19 @@ class RecordService:
                 weekly_minutes[key] = before + minutes
 
         for row in persisted:
-            # Older seed imports stored exact duplicates as a permanent source
-            # warning. Current overlap detection above is authoritative.
-            if row["warning_code"] == "seed_possible_duplicate":
-                continue
             drive_id = str(row["drive_id"])
-            drive_warnings = warnings.get(drive_id)
-            if drive_warnings is not None:
-                drive_warnings.append(
-                    {"code": row["warning_code"], "message": row["warning_message"]}
-                )
+            drive = current_drives.get(drive_id)
+            if drive is None or int(drive["version"]) != 1:
+                continue
+            if row["warning_code"] == "seed_possible_duplicate" or row["warning_message"] == (
+                "Duration was inferred from the written start and end timestamps"
+            ):
+                continue
+            warnings[drive_id].append(
+                {
+                    "code": str(row["warning_code"]),
+                    "message": str(row["warning_message"]),
+                    "action": "review_import",
+                }
+            )
         return warnings

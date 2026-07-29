@@ -196,6 +196,77 @@ class RecordTests(ServiceCase):
         self.assertEqual(self.service.warnings_for(first["id"]), [])
         self.assertEqual(self.service.warnings_for(second["id"]), [])
 
+    def test_seed_diagnostic_is_not_a_current_drive_warning(self) -> None:
+        drive = self.service.create(self.drive())
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    drive["id"],
+                    "seed_ambiguous_duration",
+                    "Duration was inferred from the written start and end timestamps",
+                    utc_now_text(),
+                ),
+            )
+        self.assertEqual(self.service.warnings_for(drive["id"]), [])
+
+    def test_actionable_import_warning_is_cleared_by_reviewing_drive(self) -> None:
+        drive = self.service.create(self.drive())
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    drive["id"],
+                    "seed_ambiguous_duration",
+                    "Written duration does not match start and end timestamps; duration was used",
+                    utc_now_text(),
+                ),
+            )
+        self.assertEqual(
+            self.service.warnings_for(drive["id"]),
+            [
+                {
+                    "code": "seed_ambiguous_duration",
+                    "message": (
+                        "Written duration does not match start and end timestamps; "
+                        "duration was used"
+                    ),
+                    "action": "review_import",
+                }
+            ],
+        )
+        self.service.update(
+            drive["id"],
+            self.drive(),
+            expected_version=1,
+            request_id=str(uuid.uuid4()),
+        )
+        self.assertEqual(self.service.warnings_for(drive["id"]), [])
+        connection = self.database.connect_readonly()
+        try:
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM drive_warnings WHERE drive_id=?", (drive["id"],)
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(remaining, 0)
+
+    def test_edit_recomputes_intrinsic_warning_from_current_values(self) -> None:
+        drive = self.service.create(self.drive(minutes=301))
+        self.assertEqual(
+            {warning["code"] for warning in self.service.warnings_for(drive["id"])},
+            {"long_drive"},
+        )
+        self.service.update(
+            drive["id"],
+            self.drive(minutes=30),
+            expected_version=1,
+            request_id=str(uuid.uuid4()),
+        )
+        self.assertEqual(self.service.warnings_for(drive["id"]), [])
+
     def test_retry_stale_delete_missing_reverse_and_midnight_guards(self) -> None:
         with self.assertRaisesRegex(ValueError, "positive duration"):
             self.service.create(self.drive(minutes=-1))
@@ -640,10 +711,7 @@ class SeedParserTests(unittest.TestCase):
 
             connection = database.connect_readonly()
             try:
-                persisted = connection.execute(
-                    "SELECT COUNT(*) FROM drive_warnings WHERE warning_code=?",
-                    ("seed_possible_duplicate",),
-                ).fetchone()[0]
+                persisted = connection.execute("SELECT COUNT(*) FROM drive_warnings").fetchone()[0]
             finally:
                 connection.close()
             self.assertEqual(persisted, 0)
@@ -672,7 +740,7 @@ class SeedParserTests(unittest.TestCase):
             (rows[1].drive.ended_at_utc - rows[1].drive.started_at_utc).total_seconds(),
             21 * 60,
         )
-        self.assertEqual(rows[1].warnings[0][0], "seed_ambiguous_duration")
+        self.assertEqual(rows[1].warnings, ())
 
     def test_seed_parser_normalizes_and_flags_nonexistent_dst_time(self) -> None:
         text = "* 2026-03-08 2:30 AM: 10 minutes, local roads"
