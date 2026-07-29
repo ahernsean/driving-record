@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
+  {% set rounded_percent = (totals.total_minutes / 36 + 0.5) | int %}
+  {% if totals.total_minutes < 3600 %}
+    {% set total_percent = [99, rounded_percent] | min %}
+  {% else %}
+    {% set total_percent = rounded_percent %}
+  {% endif %}
   {% if live %}
     <a class="live-banner" href="/live">
       {{ "Drive in progress" if live.status == "active" else "Finish saving drive" }}
@@ -14,16 +20,16 @@
         class="progress-visual"
         style="--total-progress: {{ [100, totals.total_minutes / 36] | min }}; --night-progress: {{ [100, totals.night_minutes / 6] | min }}"
       >
-        <svg viewBox="0 0 240 140" role="img" aria-label="{{ (totals.total_minutes / 36) | round(1) }} percent of required driving completed">
+        <svg viewBox="0 0 240 140" role="img" aria-label="{{ total_percent }} percent of required driving completed">
           <path fill="none" class="progress-track progress-track-total" pathLength="100" d="M 20 120 A 100 100 0 0 1 220 120"></path>
           <path fill="none" class="progress-arc progress-arc-total" pathLength="100" d="M 20 120 A 100 100 0 0 1 220 120"></path>
           <path fill="none" class="progress-track progress-track-night" pathLength="100" d="M 48 120 A 72 72 0 0 1 192 120"></path>
           <path fill="none" class="progress-arc progress-arc-night" pathLength="100" d="M 48 120 A 72 72 0 0 1 192 120"></path>
+          <g class="progress-label" aria-hidden="true">
+            <text class="progress-percent-value" x="120" y="112" text-anchor="middle" textLength="72" lengthAdjust="spacingAndGlyphs">{{ total_percent }}%</text>
+            <text class="progress-percent-caption" x="120" y="135" text-anchor="middle" textLength="72" lengthAdjust="spacingAndGlyphs">COMPLETE</text>
+          </g>
         </svg>
-        <div class="progress-percent">
-          <strong>{{ (totals.total_minutes / 36) | round(1) }}%</strong>
-          <span>complete</span>
-        </div>
       </div>
       <div class="progress-details">
         <article>

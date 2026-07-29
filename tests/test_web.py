@@ -84,6 +84,8 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Invalid form", malformed.text)
                 detail = await client.get(response.headers["location"])
                 self.assertIn("30m", detail.text)
+                self.assertIn("30m day", detail.text)
+                self.assertNotIn("0m night", detail.text)
                 self.assertNotIn("Supervisor license", detail.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", detail.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:30 PM EDT", detail.text)
@@ -94,6 +96,33 @@ class WebTests(unittest.TestCase):
                 self.assertIn("local", listing.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", listing.text)
                 self.assertIn("Apex Friendship High School", listing.text)
+                self.assertIn("30m day", listing.text)
+                self.assertNotIn("0m night", listing.text)
+                night_drive = await client.post(
+                    "/drives",
+                    headers={"Origin": "http://testserver"},
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "driver_name": "Daniel Ahern",
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T22:00",
+                        "ended_at_local": "2026-07-20T22:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(night_drive.status_code, 303)
+                night_detail = await client.get(night_drive.headers["location"])
+                self.assertIn("30m night", night_detail.text)
+                self.assertNotIn("0h 0m day", night_detail.text)
+                listing = await client.get("/drives")
+                self.assertIn("30m night", listing.text)
+                self.assertNotIn("0h 0m day", listing.text)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="2 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn(">2%</text>", dashboard.text)
+                self.assertNotIn("1.7%", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
@@ -161,6 +190,73 @@ class WebTests(unittest.TestCase):
             _parse_local("2026-11-01T01:30"),
             datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
         )
+
+    def test_dashboard_progress_rounds_half_up_without_early_completion(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+
+                async def add_drive(day: int, duration_minutes: int) -> None:
+                    start = datetime(2026, 7, day, 12, tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
+                    response = await client.post(
+                        "/drives",
+                        data={
+                            "request_id": str(uuid.uuid4()),
+                            "driver_name": "Daniel Ahern",
+                            "started_at_local": start.strftime("%Y-%m-%dT%H:%M"),
+                            "ended_at_local": (
+                                start + timedelta(minutes=duration_minutes)
+                            ).strftime("%Y-%m-%dT%H:%M"),
+                            "road_type": "local",
+                        },
+                    )
+                    self.assertEqual(response.status_code, 303)
+
+                await add_drive(1, 18)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="1 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn(">1%</text>", dashboard.text)
+
+                await add_drive(2, 72)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="3 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn(">3%</text>", dashboard.text)
+
+                for day in range(3, 13):
+                    await add_drive(day, 300)
+                await add_drive(13, 300)
+                await add_drive(14, 209)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="99 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn(">99%</text>", dashboard.text)
+
+                await add_drive(15, 1)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="100 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn(">100%</text>", dashboard.text)
+
+                await add_drive(16, 288)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="108 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn(">108%</text>", dashboard.text)
+
+        self.run_async(scenario)
 
     def test_live_drive_recovers_in_fresh_client_and_finalizes_once(self) -> None:
         async def scenario() -> None:

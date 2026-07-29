@@ -65,14 +65,10 @@ h2 { font-size: 1.2rem; }
   stroke-dasharray: var(--night-progress) 100;
   stroke: color-mix(in srgb, var(--accent) 68%, #08162b);
 }
-.progress-percent {
-  position: absolute; left: 50%; bottom: 10%; display: grid;
-  justify-items: center; transform: translateX(-50%); line-height: 1;
-}
-.progress-percent strong { font-size: clamp(1.5rem, 7vw, 2.4rem); }
-.progress-percent span {
-  margin-top: .3rem; color: var(--muted); font-size: .72rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .06em;
+.progress-label { font-family: inherit; text-rendering: geometricPrecision; }
+.progress-percent-value { fill: var(--text); font-size: 40px; font-weight: 800; }
+.progress-percent-caption {
+  fill: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .06em;
 }
 .progress-details { display: grid; gap: 1rem; }
 .progress-details article {
