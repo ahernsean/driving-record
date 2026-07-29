@@ -83,6 +83,12 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert page.locator(".progress-card").is_visible()
                 assert page.locator(".progress-arc-total").is_visible()
                 assert (
+                    page.locator(".progress-percent").evaluate(
+                        "el => getComputedStyle(el).position"
+                    )
+                    == "static"
+                )
+                assert (
                     page.locator(".progress-arc-total").evaluate("el => getComputedStyle(el).fill")
                     == "none"
                 )

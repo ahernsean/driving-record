@@ -84,6 +84,8 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Invalid form", malformed.text)
                 detail = await client.get(response.headers["location"])
                 self.assertIn("30m", detail.text)
+                self.assertIn("30m day", detail.text)
+                self.assertNotIn("0m night", detail.text)
                 self.assertNotIn("Supervisor license", detail.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", detail.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:30 PM EDT", detail.text)
@@ -94,6 +96,33 @@ class WebTests(unittest.TestCase):
                 self.assertIn("local", listing.text)
                 self.assertIn("Monday, Jul 20, 2026 at 12:00 PM EDT", listing.text)
                 self.assertIn("Apex Friendship High School", listing.text)
+                self.assertIn("30m day", listing.text)
+                self.assertNotIn("0m night", listing.text)
+                night_drive = await client.post(
+                    "/drives",
+                    headers={"Origin": "http://testserver"},
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "driver_name": "Daniel Ahern",
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T22:00",
+                        "ended_at_local": "2026-07-20T22:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(night_drive.status_code, 303)
+                night_detail = await client.get(night_drive.headers["location"])
+                self.assertIn("30m night", night_detail.text)
+                self.assertNotIn("0h 0m day", night_detail.text)
+                listing = await client.get("/drives")
+                self.assertIn("30m night", listing.text)
+                self.assertNotIn("0h 0m day", listing.text)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="2 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn("<strong>2%</strong>", dashboard.text)
+                self.assertNotIn("1.7%", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
