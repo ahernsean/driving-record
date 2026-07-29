@@ -7,13 +7,14 @@ import unittest
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import anyio
 import httpx
 from pypdf import PdfReader
 
 from driving_log.app import create_app
-from driving_log.config import Settings
+from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.web import _format_local_datetime, _parse_local
 
 
@@ -181,6 +182,7 @@ class WebTests(unittest.TestCase):
                     live_state = await first.get("/live/state")
                     self.assertEqual(live_state.status_code, 200)
                     self.assertIsNotNone(live_state.json()["live"])
+                    live_started_at_utc = str(live_state.json()["live"]["started_at_utc"])
                 async with httpx.AsyncClient(
                     transport=transport,
                     base_url="http://testserver",
@@ -215,18 +217,19 @@ class WebTests(unittest.TestCase):
                         r'name="started_at_local" value="([^"]+)"', completion.text
                     )
                     self.assertIsNotNone(start_match)
-                    # The HTTP scenario is intentionally short, so correct the end a
-                    # few minutes beyond the just-rendered start.  Deriving it from
-                    # the live drive keeps this regression test valid over time.
-                    corrected_end = (
-                        datetime.fromisoformat(start_match.group(1))  # type: ignore[union-attr]
+                    # Work in UTC first so the synthetic five-minute drive remains
+                    # valid across DST gaps and folds.
+                    corrected_end_local = (
+                        datetime.fromisoformat(live_started_at_utc.replace("Z", "+00:00"))
+                        .astimezone(UTC)
                         + timedelta(minutes=5)
-                    ).strftime("%Y-%m-%dT%H:%M")
+                    ).astimezone(ZoneInfo(DEFAULT_TIMEZONE))
                     finalization_data = {
                         "request_id": str(uuid.uuid4()),
                         "road_type": "local",
                         "started_at_local": start_match.group(1),  # type: ignore[union-attr]
-                        "ended_at_local": corrected_end,
+                        "ended_at_local": corrected_end_local.strftime("%Y-%m-%dT%H:%M"),
+                        "end_fold": str(corrected_end_local.fold),
                         "end_location": "Home",
                     }
                     finalized = await newest.post(
