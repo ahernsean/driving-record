@@ -167,8 +167,9 @@ Rules:
 
 ### 2. `drive_warnings`
 
-Stores non-fatal source-quality findings and warning acknowledgements that
-cannot be reconstructed from canonical drive fields.
+Stores actionable source-quality findings found during import. They are shown
+until the drive is reviewed and successfully saved, at which point its source
+warnings are deleted in the same transaction as the edit.
 
 Fields:
 
@@ -178,16 +179,16 @@ Fields:
 - `warning_message`
 - `created_at`
 
-Examples:
-
-- `seed_ambiguous_duration`
-- `seed_possible_duplicate`
-- `seed_day_night_mismatch`
-
 Intrinsic warnings such as long duration and crossing midnight, and relational
 warnings such as overlaps and weekly overage, are derived from the current
 non-deleted drive set. They must not be persisted as authoritative warning rows
 because imports and deletions can invalidate them.
+
+Ordinary parsing choices, such as calculating duration from explicit start and
+end timestamps, belong only to `import_rows` provenance. Actionable ambiguity
+or source conflict appears initially with a link to review and save the drive.
+Exact source duplicates use the derived overlap warning instead of a persisted
+source warning.
 
 ### 3. `live_drives`
 
@@ -333,7 +334,7 @@ For the PDF:
 - Resolve the start to a UTC instant using `America/New_York`, compute the end
   instant from duration, and recompute canonical day/night minutes from the
   Apex solar rule.
-- Preserve the source day/night value in `import_rows`; attach a
+- Preserve the source day/night value in `import_rows`; attach a reviewable
   `seed_day_night_mismatch` warning when it differs from the computed split.
 - Keep environment text as `road_type` when possible.
 - Store `Sean Ahern` as supervisor where present.
@@ -350,13 +351,13 @@ For `log.txt`:
 - If a row lacks enough information to compute duration, import it as a failed
   row in `import_rows` and require manual completion in the UI.
 
-The last line in `records/log.txt` currently appears incomplete:
+The last line in `records/log.txt` has no separately written duration:
 
 - `2026-07-24 11:10-11:31: local and highways with wet roads, cloudy conditions`
 
-That line has start/end times but no explicit minutes. The importer should
-compute a 21 minute duration from the times and attach a warning noting that
-duration was inferred from timestamps rather than written explicitly.
+That line has enough information to be complete: its start and end timestamps
+define a 21 minute duration. The importer computes that duration without a
+warning and preserves the source row as provenance.
 
 ### Authoritative-record rule
 
@@ -442,7 +443,7 @@ Allow save, but show prominent warnings when:
 - drive crosses midnight
 - drive overlaps another saved drive
 - the drive would cause its week's total to exceed 10 hours
-- imported row required inferred duration or other assumptions
+- imported data contains an ambiguity or conflicts with its canonical value
 
 ### Weekly cap handling
 
@@ -597,7 +598,8 @@ The edit form reuses the large manual-entry controls and allows correction of:
 
 Saving an edit occurs in one transaction. It validates the submitted record
 version, reruns hard validation, recomputes duration and day/night minutes, and
-updates the drive without changing its stable ID or provenance. The response
+updates the drive without changing its stable ID or provenance. It also clears
+the drive's reviewable import warnings. The response
 includes newly derived long-drive, midnight, overlap, and weekly-overage
 warnings. An `audit_events` row records the before and after values with private
 license data redacted. If another session edited the drive first, return a
@@ -1232,8 +1234,9 @@ Required before deployment:
 
 These should be handled explicitly during implementation:
 
-1. The final `records/log.txt` row has no written duration, only start/end
-   times and notes. Importer should infer 21 minutes and mark the inference.
+1. The final `records/log.txt` row has no separately written duration, but its
+   start/end timestamps define 21 minutes. Import that interval normally and
+   preserve the original row as provenance.
 2. The Road Ready PDF includes duplicated-looking timestamps in at least one
    place (`08/10/2025 6:27 PM` appears twice). Treat as potential duplicates,
    not automatic deletion.

@@ -245,6 +245,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 title="Drive details",
                 drive=drive,
                 warnings=records.warnings_for(drive_id),
+                import_evidence=records.import_evidence_for(drive_id),
             ),
         )
 

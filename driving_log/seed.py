@@ -194,12 +194,6 @@ def parse_log_text(text: str, source_name: str) -> list[SeedCandidate]:
             warnings.append(end_warning)
         if written_duration is None and local_end is not None:
             written_duration = round((local_end - local_start).total_seconds() / 60)
-            warnings.append(
-                (
-                    "seed_ambiguous_duration",
-                    "Duration was inferred from the written start and end timestamps",
-                )
-            )
         if written_duration is None:
             raise ValueError(f"log row has no usable duration: {line}")
         computed_end = (
@@ -370,6 +364,8 @@ def apply_seed(database: Database, pdf_path: Path, log_path: Path) -> dict[str, 
                         )
                     )
                 for code, message in warnings:
+                    if code == "seed_possible_duplicate":
+                        continue
                     connection.execute(
                         "INSERT OR IGNORE INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
                         (str(uuid.uuid4()), drive["id"], code, message, utc_now_text()),

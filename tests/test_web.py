@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
 import io
+import json
 import re
 import tempfile
 import unittest
@@ -15,6 +18,7 @@ from pypdf import PdfReader
 
 from driving_log.app import create_app
 from driving_log.config import DEFAULT_TIMEZONE, Settings
+from driving_log.db import utc_now_text
 from driving_log.web import _format_local_datetime, _parse_local
 
 
@@ -72,6 +76,59 @@ class WebTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(response.status_code, 303)
+                drive_id = response.headers["location"].rsplit("/", 1)[-1]
+                batch_id = str(uuid.uuid4())
+                raw_source = "* 2026-07-20 12:00 PM-12:30 PM: 45 minutes, local roads"
+                with self.app.state.database.transaction() as connection:
+                    connection.execute(
+                        """
+                        INSERT INTO import_batches VALUES (?, 'seed_log_txt', ?, ?, '1', ?, ?,
+                                                           'completed', '{}')
+                        """,
+                        (
+                            batch_id,
+                            "log.txt",
+                            hashlib.sha256(raw_source.encode()).hexdigest(),
+                            utc_now_text(),
+                            gzip.compress(raw_source.encode()),
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE drives SET import_batch_id=? WHERE id=?", (batch_id, drive_id)
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO import_rows VALUES (?, ?, 'seed_log_txt', 'log.txt', '1',
+                                                        ?, ?, ?, 'created', NULL)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            batch_id,
+                            raw_source,
+                            json.dumps(
+                                {
+                                    "started_at_utc": "2026-07-20T16:00:00Z",
+                                    "ended_at_utc": "2026-07-20T16:45:00Z",
+                                    "source_day_minutes": 45,
+                                    "source_night_minutes": None,
+                                }
+                            ),
+                            drive_id,
+                        ),
+                    )
+                    connection.execute(
+                        "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                        (
+                            str(uuid.uuid4()),
+                            drive_id,
+                            "seed_ambiguous_duration",
+                            (
+                                "Written duration does not match start and end timestamps; "
+                                "duration was used"
+                            ),
+                            utc_now_text(),
+                        ),
+                    )
                 malformed = await client.post(
                     "/drives",
                     data={
@@ -91,6 +148,13 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Monday, Jul 20, 2026 at 12:30 PM EDT", detail.text)
                 self.assertNotIn("Started (UTC)", detail.text)
                 self.assertIn("Apex Friendship High School", detail.text)
+                self.assertIn("Written duration does not match", detail.text)
+                self.assertIn("Review and save this drive", detail.text)
+                self.assertIn("Imported source evidence", detail.text)
+                self.assertIn(raw_source, detail.text)
+                self.assertIn("Importer read start", detail.text)
+                self.assertIn("Source day duration", detail.text)
+                self.assertIn("0h 45m", detail.text)
                 listing = await client.get("/drives")
                 self.assertIn("Drive history", listing.text)
                 self.assertIn("local", listing.text)
@@ -151,6 +215,7 @@ class WebTests(unittest.TestCase):
                 updated_detail = await client.get(updated.headers["location"])
                 self.assertIn("45m", updated_detail.text)
                 self.assertIn("Home", updated_detail.text)
+                self.assertNotIn("Written duration does not match", updated_detail.text)
                 updated_version = re.search(r'name="version" value="(\d+)"', updated_detail.text)
                 self.assertIsNotNone(updated_version)
                 deleted = await client.post(

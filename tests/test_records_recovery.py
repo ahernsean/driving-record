@@ -28,7 +28,7 @@ from driving_log.archive import (
     verify_archive,
 )
 from driving_log.csv_backup import CSV_COLUMNS, LEGACY_CSV_COLUMNS, export_csv, import_csv
-from driving_log.db import Database
+from driving_log.db import Database, utc_now_text
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.seed import (
     apply_seed,
@@ -165,6 +165,107 @@ class RecordTests(ServiceCase):
         self.assertEqual(totals["weeks"][0]["overage_minutes"], 1)  # type: ignore[index]
         self.service.delete(first["id"], expected_version=1, request_id=str(uuid.uuid4()))
         self.assertEqual(self.service.warnings_for(second["id"]), [])
+
+    def test_historical_source_duplicate_is_replaced_by_current_overlap(self) -> None:
+        first = self.service.create(self.drive())
+        second = self.service.create(self.drive())
+        with self.database.transaction() as connection:
+            for drive in (first, second):
+                connection.execute(
+                    """
+                    INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        drive["id"],
+                        "seed_possible_duplicate",
+                        "Source contains another entry with the same start and duration",
+                        utc_now_text(),
+                    ),
+                )
+        self.assertEqual(
+            {warning["code"] for warning in self.service.warnings_for(second["id"])},
+            {"overlap"},
+        )
+        self.service.update(
+            second["id"],
+            self.drive(datetime(2026, 7, 20, 13, tzinfo=self.zone)),
+            expected_version=1,
+            request_id=str(uuid.uuid4()),
+        )
+        self.assertEqual(self.service.warnings_for(first["id"]), [])
+        self.assertEqual(self.service.warnings_for(second["id"]), [])
+
+    def test_seed_diagnostic_is_not_a_current_drive_warning(self) -> None:
+        drive = self.service.create(self.drive())
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    drive["id"],
+                    "seed_ambiguous_duration",
+                    "Duration was inferred from the written start and end timestamps",
+                    utc_now_text(),
+                ),
+            )
+        self.assertEqual(self.service.warnings_for(drive["id"]), [])
+
+    def test_actionable_import_warning_is_cleared_by_reviewing_drive(self) -> None:
+        drive = self.service.create(self.drive())
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                (
+                    str(uuid.uuid4()),
+                    drive["id"],
+                    "seed_ambiguous_duration",
+                    "Written duration does not match start and end timestamps; duration was used",
+                    utc_now_text(),
+                ),
+            )
+        self.assertEqual(
+            self.service.warnings_for(drive["id"]),
+            [
+                {
+                    "code": "seed_ambiguous_duration",
+                    "message": (
+                        "Written duration does not match start and end timestamps; "
+                        "duration was used"
+                    ),
+                    "action": "review_import",
+                }
+            ],
+        )
+        self.service.update(
+            drive["id"],
+            self.drive(),
+            expected_version=1,
+            request_id=str(uuid.uuid4()),
+        )
+        self.assertEqual(self.service.warnings_for(drive["id"]), [])
+        connection = self.database.connect_readonly()
+        try:
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM drive_warnings WHERE drive_id=?", (drive["id"],)
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(remaining, 0)
+
+    def test_edit_recomputes_intrinsic_warning_from_current_values(self) -> None:
+        drive = self.service.create(self.drive(minutes=301))
+        self.assertEqual(
+            {warning["code"] for warning in self.service.warnings_for(drive["id"])},
+            {"long_drive"},
+        )
+        self.service.update(
+            drive["id"],
+            self.drive(minutes=30),
+            expected_version=1,
+            request_id=str(uuid.uuid4()),
+        )
+        self.assertEqual(self.service.warnings_for(drive["id"]), [])
 
     def test_retry_stale_delete_missing_reverse_and_midnight_guards(self) -> None:
         with self.assertRaisesRegex(ValueError, "positive duration"):
@@ -590,6 +691,41 @@ class SeedParserTests(unittest.TestCase):
         self.assertTrue(all(row.drive.road_type == "local" for row in rows))
         self.assertNotEqual(rows[0].drive_id, rows[1].drive_id)
 
+    def test_seed_duplicates_are_persisted_as_drives_not_warnings(self) -> None:
+        pdf_text = "\n".join(
+            [
+                "08/10/2025 6:27 PM 0h 8m Local Sean Ahern",
+                "08/10/2025 6:27 PM 0h 8m Local Sean Ahern",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_path = root / "seed.pdf"
+            log_path = root / "log.txt"
+            pdf_path.write_bytes(b"pdf")
+            log_path.write_text("* 2026-07-24 11:10-11:31: local roads")
+            database = Database(root / "state.sqlite3")
+            database.initialize()
+            with mock.patch("driving_log.seed.extract_pdf", return_value=pdf_text):
+                self.assertEqual(apply_seed(database, pdf_path, log_path)["created"], 3)
+
+            connection = database.connect_readonly()
+            try:
+                persisted = connection.execute("SELECT COUNT(*) FROM drive_warnings").fetchone()[0]
+            finally:
+                connection.close()
+            self.assertEqual(persisted, 0)
+            records = RecordService(database)
+            duplicate_drives = [
+                drive for drive in records.list_drives() if drive["source"] == "seed_pdf"
+            ]
+            self.assertEqual(len(duplicate_drives), 2)
+            for drive in duplicate_drives:
+                self.assertEqual(
+                    {warning["code"] for warning in records.warnings_for(drive["id"])},
+                    {"overlap"},
+                )
+
     def test_text_parser_understands_ampm_and_infers_final_duration(self) -> None:
         text = "\n".join(
             [
@@ -604,7 +740,7 @@ class SeedParserTests(unittest.TestCase):
             (rows[1].drive.ended_at_utc - rows[1].drive.started_at_utc).total_seconds(),
             21 * 60,
         )
-        self.assertEqual(rows[1].warnings[0][0], "seed_ambiguous_duration")
+        self.assertEqual(rows[1].warnings, ())
 
     def test_seed_parser_normalizes_and_flags_nonexistent_dst_time(self) -> None:
         text = "* 2026-03-08 2:30 AM: 10 minutes, local roads"

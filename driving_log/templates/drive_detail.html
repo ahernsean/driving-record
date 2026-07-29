@@ -24,7 +24,36 @@
     <div><span>Source</span><strong>{{ drive.source }}</strong></div>
   </section>
   {% if warnings %}
-    <section class="warning-card"><h2>Warnings</h2>{% for warning in warnings %}<p>{{ warning.message }}</p>{% endfor %}</section>
+    <section class="warning-card">
+      <h2>Warnings</h2>
+      {% for warning in warnings %}
+        <p>
+          {{ warning.message }}
+          {% if warning.action == "review_import" %}
+            <a href="/drives/{{ drive.id }}/edit">Review and save this drive to clear this import warning.</a>
+          {% endif %}
+        </p>
+      {% endfor %}
+      {% if import_evidence %}
+        <h3>Imported source evidence</h3>
+        <p><strong>{{ import_evidence.source_name }}, row {{ import_evidence.row_key }}</strong></p>
+        <p><code>{{ import_evidence.raw_text }}</code></p>
+        <div class="detail-card">
+          {% if import_evidence.parsed.started_at_utc %}
+            <div><span>Importer read start</span><strong>{{ format_local_datetime(import_evidence.parsed.started_at_utc) }}</strong></div>
+          {% endif %}
+          {% if import_evidence.parsed.ended_at_utc %}
+            <div><span>Importer read end</span><strong>{{ format_local_datetime(import_evidence.parsed.ended_at_utc) }}</strong></div>
+          {% endif %}
+          {% if import_evidence.parsed.source_day_minutes is not none %}
+            <div><span>Source day duration</span><strong>{{ format_minutes(import_evidence.parsed.source_day_minutes) }}</strong></div>
+          {% endif %}
+          {% if import_evidence.parsed.source_night_minutes is not none %}
+            <div><span>Source night duration</span><strong>{{ format_minutes(import_evidence.parsed.source_night_minutes) }}</strong></div>
+          {% endif %}
+        </div>
+      {% endif %}
+    </section>
   {% endif %}
   <div class="actions">
     <a class="button" href="/drives/{{ drive.id }}/edit">Edit drive</a>
