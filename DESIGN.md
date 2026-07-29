@@ -351,13 +351,13 @@ For `log.txt`:
 - If a row lacks enough information to compute duration, import it as a failed
   row in `import_rows` and require manual completion in the UI.
 
-The last line in `records/log.txt` currently appears incomplete:
+The last line in `records/log.txt` has no separately written duration:
 
 - `2026-07-24 11:10-11:31: local and highways with wet roads, cloudy conditions`
 
-That line has start/end times but no explicit minutes. The importer should
-compute a 21 minute duration from the times and attach a warning noting that
-duration was inferred from timestamps rather than written explicitly.
+That line has enough information to be complete: its start and end timestamps
+define a 21 minute duration. The importer computes that duration without a
+warning and preserves the source row as provenance.
 
 ### Authoritative-record rule
 
@@ -1234,8 +1234,9 @@ Required before deployment:
 
 These should be handled explicitly during implementation:
 
-1. The final `records/log.txt` row has no written duration, only start/end
-   times and notes. Importer should infer 21 minutes and mark the inference.
+1. The final `records/log.txt` row has no separately written duration, but its
+   start/end timestamps define 21 minutes. Import that interval normally and
+   preserve the original row as provenance.
 2. The Road Ready PDF includes duplicated-looking timestamps in at least one
    place (`08/10/2025 6:27 PM` appears twice). Treat as potential duplicates,
    not automatic deletion.

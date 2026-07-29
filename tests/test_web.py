@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
 import io
+import json
 import re
 import tempfile
 import unittest
@@ -74,7 +77,45 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 303)
                 drive_id = response.headers["location"].rsplit("/", 1)[-1]
+                batch_id = str(uuid.uuid4())
+                raw_source = "* 2026-07-20 12:00 PM-12:30 PM: 45 minutes, local roads"
                 with self.app.state.database.transaction() as connection:
+                    connection.execute(
+                        """
+                        INSERT INTO import_batches VALUES (?, 'seed_log_txt', ?, ?, '1', ?, ?,
+                                                           'completed', '{}')
+                        """,
+                        (
+                            batch_id,
+                            "log.txt",
+                            hashlib.sha256(raw_source.encode()).hexdigest(),
+                            utc_now_text(),
+                            gzip.compress(raw_source.encode()),
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE drives SET import_batch_id=? WHERE id=?", (batch_id, drive_id)
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO import_rows VALUES (?, ?, 'seed_log_txt', 'log.txt', '1',
+                                                        ?, ?, ?, 'created', NULL)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            batch_id,
+                            raw_source,
+                            json.dumps(
+                                {
+                                    "started_at_utc": "2026-07-20T16:00:00Z",
+                                    "ended_at_utc": "2026-07-20T16:45:00Z",
+                                    "source_day_minutes": 45,
+                                    "source_night_minutes": None,
+                                }
+                            ),
+                            drive_id,
+                        ),
+                    )
                     connection.execute(
                         "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
                         (
@@ -109,6 +150,11 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Apex Friendship High School", detail.text)
                 self.assertIn("Written duration does not match", detail.text)
                 self.assertIn("Review and save this drive", detail.text)
+                self.assertIn("Imported source evidence", detail.text)
+                self.assertIn(raw_source, detail.text)
+                self.assertIn("Importer read start", detail.text)
+                self.assertIn("Source day duration", detail.text)
+                self.assertIn("0h 45m", detail.text)
                 listing = await client.get("/drives")
                 self.assertIn("Drive history", listing.text)
                 self.assertIn("local", listing.text)

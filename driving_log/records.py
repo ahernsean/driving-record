@@ -352,6 +352,38 @@ class RecordService:
         connection.close()
         return rows
 
+    def import_evidence_for(self, drive_id: str) -> dict[str, object] | None:
+        connection = self.database.connect_readonly()
+        try:
+            row = connection.execute(
+                """
+                SELECT r.source_type, r.source_instance_id, r.source_row_key,
+                       r.raw_text, r.parsed_payload_json
+                FROM drives AS d
+                JOIN import_rows AS r
+                  ON r.import_batch_id = d.import_batch_id
+                 AND r.result_drive_id = d.id
+                WHERE d.id = ?
+                ORDER BY r.rowid
+                LIMIT 1
+                """,
+                (drive_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            return None
+        parsed = json.loads(str(row["parsed_payload_json"]))
+        if not isinstance(parsed, dict):
+            parsed = {}
+        return {
+            "source_type": str(row["source_type"]),
+            "source_name": str(row["source_instance_id"]),
+            "row_key": str(row["source_row_key"]),
+            "raw_text": str(row["raw_text"]),
+            "parsed": parsed,
+        }
+
     def totals(self) -> dict[str, object]:
         connection = self.database.connect_readonly()
         totals = connection.execute(
