@@ -82,12 +82,11 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert "Daniel Driving Log" in page.title()
                 assert page.locator(".progress-card").is_visible()
                 assert page.locator(".progress-arc-total").is_visible()
-                assert (
-                    page.locator(".progress-percent").evaluate(
-                        "el => getComputedStyle(el).position"
-                    )
-                    == "static"
-                )
+                gauge = page.locator(".progress-visual svg").bounding_box()
+                percent = page.locator(".progress-layout > .progress-percent").bounding_box()
+                assert gauge is not None
+                assert percent is not None
+                assert percent["y"] >= gauge["y"] + gauge["height"]
                 assert (
                     page.locator(".progress-arc-total").evaluate("el => getComputedStyle(el).fill")
                     == "none"
