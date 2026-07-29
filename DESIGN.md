@@ -290,7 +290,15 @@ including location, timezone, calendar-week convention, driver name, and
 optional supervisor defaults. Secrets and Microsoft credentials remain outside
 the database.
 
-### 7. `audit_events`
+### 7. `supervisor_profiles`
+
+Stores the private export-time mapping from a supervising driver's normalized
+name to their license number and two-letter state. Profiles are managed from
+the DMV export page, included in full-state archives, and excluded from CSV
+backups and audit metadata. Ordinary drive entry continues to store only the
+supervisor name.
+
+### 8. `audit_events`
 
 Records security-neutral mutations and operational events such as drive
 creation/deletion, live-drive finalization/cancellation, imports, archive
@@ -1094,19 +1102,23 @@ in environment variables or a local config file excluded from version control.
 ## Reporting / DMV Export
 
 In addition to CSV drive-log backup and full-state archives, the app should
-produce a DMV-friendly view:
+produce a filled, flattened DL-4A PDF:
 
 - chronological table matching the `DL-4A` columns
 - total day hours
 - total night hours
 - grand total
+- one row per non-deleted completed drive, with exact `H:MM` durations
+- supervisor license mapping from `supervisor_profiles`, falling back to
+  legacy per-drive license fields
+- blank supervisor cells when a drive has no supervising driver
+- blank customer and certification sections for later handwritten completion
+- continuation pages derived from the official packaged template, with totals
+  only on the final page
 
-Future enhancement:
-
-- generate a filled PDF or print-friendly page aligned to `DL-4A`
-
-That is not required for the authoritative-record design, but the data model
-should support it directly.
+The review page reports unmapped supervising drivers, blank-supervisor rows,
+page count, and calendar-week overages. These warnings do not block export or
+change the authoritative raw totals.
 
 ## Test And Release Strategy
 

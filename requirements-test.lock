@@ -22,6 +22,9 @@ astral==3.2 \
     --hash=sha256:9b7c3b412e9e69d172cfb24be0e6addcc9f1bd01a28db8bebe66d75ccc533d88 \
     --hash=sha256:cb7b49a3f0d4c64ae666be131276d2a3226134c598db10e672028cf8ff855f83
     # via driving-log (pyproject.toml)
+charset-normalizer==3.4.9 \
+    --hash=sha256:84fd18bcc17526fc2b3c1af7d2b9217d32c9c04448c16ec693b9b4f1985c3d33
+    # via reportlab
 certifi==2026.7.22 \
     --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
     --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
@@ -485,6 +488,9 @@ playwright==1.61.0 \
     --hash=sha256:e9fcbffcf557a8620fdedd92491eb59a32d18e23d6f3b4f6214b952be324fe51 \
     --hash=sha256:ff138c3a604f69911e9d42fd036e55c2a171e5616edf04c1e7f60a2a285540b0
     # via driving-log (pyproject.toml)
+pillow==12.3.0 \
+    --hash=sha256:0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3
+    # via reportlab
 pluggy==1.6.0 \
     --hash=sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3 \
     --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746
@@ -638,6 +644,12 @@ pytest-cov==7.0.0 \
 python-multipart==0.0.32 \
     --hash=sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e \
     --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23
+    # via driving-log (pyproject.toml)
+pypdf==6.14.2 \
+    --hash=sha256:3f07891af76dc002657e04993ab9b4de81de29f9013b9761d0b7968bff12e946
+    # via driving-log (pyproject.toml)
+reportlab==5.0.0 \
+    --hash=sha256:9d5a3affa84919e1111ede580031266a570e93b1ce388219621347965ff1d93c
     # via driving-log (pyproject.toml)
 ruff==0.15.7 \
     --hash=sha256:04f1ae61fc20fe0b148617c324d9d009b5f63412c0b16474f3d5f1a1a665f7ac \

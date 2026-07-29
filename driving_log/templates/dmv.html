@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>DMV driving record</h1>
+  <section class="detail-card">
+    <div><span>Recorded drives</span><strong>{{ review.drive_count }}</strong></div>
+    <div><span>PDF pages</span><strong>{{ review.page_count }}</strong></div>
+  </section>
+
+  {% if review.unmapped_supervisors or review.blank_supervisor_count or review.weekly_overages %}
+    <section class="warning-card">
+      <strong>Review before downloading</strong>
+      {% if review.unmapped_supervisors %}
+        <p>License information is missing for {{ review.unmapped_supervisors | join(", ") }}.</p>
+      {% endif %}
+      {% if review.blank_supervisor_count %}
+        <p>{{ review.blank_supervisor_count }} drive{{ "" if review.blank_supervisor_count == 1 else "s" }} will have blank supervisor fields.</p>
+      {% endif %}
+      {% if review.weekly_overages %}
+        <p>{{ review.weekly_overages | length }} calendar week{{ "" if review.weekly_overages | length == 1 else "s" }} exceed the 10-hour advisory. The PDF includes every recorded minute.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <section class="actions">
+    <a class="button primary" href="/dmv/export">Download filled DL-4A PDF</a>
+  </section>
+
+  <h2>Supervising drivers</h2>
+  <p class="muted">License details are stored in the private database and full-state archives. They are not included in CSV backups.</p>
+  {% for profile in profiles %}
+    <article class="detail-card profile-card">
+      <strong>{{ profile.display_name }}</strong>
+      <span>{{ profile.masked_license }}, {{ profile.dl_state }}</span>
+      <details>
+        <summary>Edit license information</summary>
+        <form class="stacked-form" method="post" action="/dmv/profiles" data-async-submit>
+          <input type="hidden" name="request_id" value="{{ '81000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+          <input type="hidden" name="profile_id" value="{{ profile.id }}">
+          <input type="hidden" name="version" value="{{ profile.version }}">
+          <label>Name<input required name="display_name" value="{{ profile.display_name }}"></label>
+          <label>Driver license number<input required autocomplete="off" name="dl_number" value="{{ profile.dl_number }}"></label>
+          <label>State<input required maxlength="2" autocapitalize="characters" name="dl_state" value="{{ profile.dl_state }}"></label>
+          <button class="primary" type="submit">Save changes</button>
+        </form>
+        <form method="post" action="/dmv/profiles/{{ profile.id }}/delete" data-async-submit onsubmit="return confirm('Delete this supervising driver profile?')">
+          <input type="hidden" name="request_id" value="{{ '82000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+          <input type="hidden" name="version" value="{{ profile.version }}">
+          <button class="danger" type="submit">Delete profile</button>
+        </form>
+      </details>
+    </article>
+  {% endfor %}
+
+  <h2>Add license information</h2>
+  <form class="stacked-form" method="post" action="/dmv/profiles" data-async-submit>
+    <input type="hidden" name="request_id" value="{{ '83000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+    <label>Name
+      <input required name="display_name" list="drive-supervisor-names">
+      <datalist id="drive-supervisor-names">
+        {% for name in drive_supervisors %}<option value="{{ name }}">{% endfor %}
+      </datalist>
+    </label>
+    <label>Driver license number<input required autocomplete="off" name="dl_number"></label>
+    <label>State<input required maxlength="2" autocapitalize="characters" name="dl_state" placeholder="NC"></label>
+    <button class="primary" type="submit">Save supervising driver</button>
+  </form>
+{% endblock %}

@@ -14,6 +14,7 @@ from driving_log.archive import create_archive, restore_archive, verify_archive
 from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
+from driving_log.dmv import DmvExportService
 from driving_log.migrations import LATEST_SCHEMA_VERSION
 from driving_log.operations import (
     apply_retention,
@@ -71,6 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
     archive_request.add_argument("operation_id")
     imports = sub.add_parser("imports")
     imports.add_argument("action", choices=("status",))
+    dmv = sub.add_parser("dmv")
+    dmv_sub = dmv.add_subparsers(dest="dmv_action", required=True)
+    dmv_export = dmv_sub.add_parser("export")
+    dmv_export.add_argument("--out", type=Path, required=True)
     return parser
 
 
@@ -333,6 +338,10 @@ def main(argv: list[str] | None = None) -> int:
         ).fetchall()
         connection.close()
         print(json.dumps([dict(row) for row in rows], indent=2, sort_keys=True))
+        return 0
+    if args.command == "dmv":
+        args.out.write_bytes(DmvExportService(database).generate())
+        print(args.out)
         return 0
     return 2
 
