@@ -5,7 +5,7 @@ import re
 import tempfile
 import unittest
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import anyio
@@ -215,13 +215,18 @@ class WebTests(unittest.TestCase):
                         r'name="started_at_local" value="([^"]+)"', completion.text
                     )
                     self.assertIsNotNone(start_match)
-                    # The HTTP scenario is intentionally short, so correct the end into
-                    # the future enough to produce a valid minute-based record.
+                    # The HTTP scenario is intentionally short, so correct the end a
+                    # few minutes beyond the just-rendered start.  Deriving it from
+                    # the live drive keeps this regression test valid over time.
+                    corrected_end = (
+                        datetime.fromisoformat(start_match.group(1))  # type: ignore[union-attr]
+                        + timedelta(minutes=5)
+                    ).strftime("%Y-%m-%dT%H:%M")
                     finalization_data = {
                         "request_id": str(uuid.uuid4()),
                         "road_type": "local",
                         "started_at_local": start_match.group(1),  # type: ignore[union-attr]
-                        "ended_at_local": "2026-07-27T12:00",
+                        "ended_at_local": corrected_end,
                         "end_location": "Home",
                     }
                     finalized = await newest.post(
