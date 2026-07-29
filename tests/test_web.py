@@ -191,6 +191,66 @@ class WebTests(unittest.TestCase):
             datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
         )
 
+    def test_dashboard_progress_rounds_half_up_without_early_completion(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+
+                async def add_drive(day: int, duration_minutes: int) -> None:
+                    start = datetime(2026, 7, day, 12, tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
+                    response = await client.post(
+                        "/drives",
+                        data={
+                            "request_id": str(uuid.uuid4()),
+                            "driver_name": "Daniel Ahern",
+                            "started_at_local": start.strftime("%Y-%m-%dT%H:%M"),
+                            "ended_at_local": (
+                                start + timedelta(minutes=duration_minutes)
+                            ).strftime("%Y-%m-%dT%H:%M"),
+                            "road_type": "local",
+                        },
+                    )
+                    self.assertEqual(response.status_code, 303)
+
+                await add_drive(1, 18)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="1 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn("<strong>1%</strong>", dashboard.text)
+
+                await add_drive(2, 72)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="3 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn("<strong>3%</strong>", dashboard.text)
+
+                for day in range(3, 13):
+                    await add_drive(day, 300)
+                await add_drive(13, 300)
+                await add_drive(14, 209)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="99 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn("<strong>99%</strong>", dashboard.text)
+
+                await add_drive(15, 1)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="100 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn("<strong>100%</strong>", dashboard.text)
+
+        self.run_async(scenario)
+
     def test_live_drive_recovers_in_fresh_client_and_finalizes_once(self) -> None:
         async def scenario() -> None:
             async with self.app.router.lifespan_context(self.app):

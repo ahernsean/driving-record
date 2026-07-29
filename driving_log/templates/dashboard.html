@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-  {% set total_percent = (totals.total_minutes / 36) | round | int %}
+  {% if totals.total_minutes < 3600 %}
+    {% set total_percent = [99, (totals.total_minutes / 36 + 0.5) | int] | min %}
+  {% else %}
+    {% set total_percent = 100 %}
+  {% endif %}
   {% if live %}
     <a class="live-banner" href="/live">
       {{ "Drive in progress" if live.status == "active" else "Finish saving drive" }}
