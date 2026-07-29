@@ -73,7 +73,10 @@ def create_archive(database: Database, archive_dir: Path, out: Path | None = Non
     with tempfile.TemporaryDirectory(dir=target_dir) as temporary:
         workspace = Path(temporary)
         snapshot = workspace / "database.sqlite3"
-        source = database.connect()
+        # A snapshot is read-only work. Reapplying WAL mode here would need a
+        # write lock and can fail while the web application is serving a
+        # concurrent request.
+        source = database.connect_readonly()
         destination = sqlite3.connect(snapshot)
         source.backup(destination)
         destination.close()

@@ -484,6 +484,15 @@ class ArchiveTests(ServiceCase):
         restored.database.initialize()
         self.assertIsNone(restored.get(drive["id"])["deleted_at"])
 
+    def test_archive_snapshot_does_not_reconfigure_the_live_database(self) -> None:
+        with mock.patch.object(
+            self.database,
+            "connect",
+            side_effect=AssertionError("archive creation must not change journal mode"),
+        ):
+            archive = create_archive(self.database, Path(self.temporary.name) / "archives")
+        self.assertTrue(verify_archive(archive)["verified"])
+
     @pytest.mark.security
     def test_restore_requires_confirmation_and_hash_is_checked(self) -> None:
         archive = create_archive(self.database, Path(self.temporary.name) / "archives")
