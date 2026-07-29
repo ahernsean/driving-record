@@ -370,6 +370,8 @@ def apply_seed(database: Database, pdf_path: Path, log_path: Path) -> dict[str, 
                         )
                     )
                 for code, message in warnings:
+                    if code == "seed_possible_duplicate":
+                        continue
                     connection.execute(
                         "INSERT OR IGNORE INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
                         (str(uuid.uuid4()), drive["id"], code, message, utc_now_text()),

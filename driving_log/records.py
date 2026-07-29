@@ -423,7 +423,6 @@ class RecordService:
             connection.close()
 
         warnings: dict[str, list[dict[str, str]]] = {str(drive["id"]): [] for drive in drives}
-        active_drives = {str(drive["id"]): drive for drive in drives}
         intervals: dict[str, tuple[datetime, datetime]] = {}
         from zoneinfo import ZoneInfo
 
@@ -496,19 +495,13 @@ class RecordService:
                 weekly_minutes[key] = before + minutes
 
         for row in persisted:
+            # Older seed imports stored exact duplicates as a permanent source
+            # warning. Current overlap detection above is authoritative.
+            if row["warning_code"] == "seed_possible_duplicate":
+                continue
             drive_id = str(row["drive_id"])
             drive_warnings = warnings.get(drive_id)
             if drive_warnings is not None:
-                if row["warning_code"] == "seed_possible_duplicate":
-                    drive = active_drives[drive_id]
-                    duplicate_remains = any(
-                        str(other["id"]) != drive_id
-                        and other["started_at_utc"] == drive["started_at_utc"]
-                        and other["ended_at_utc"] == drive["ended_at_utc"]
-                        for other in drives
-                    )
-                    if not duplicate_remains:
-                        continue
                 drive_warnings.append(
                     {"code": row["warning_code"], "message": row["warning_message"]}
                 )

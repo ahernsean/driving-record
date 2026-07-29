@@ -166,7 +166,7 @@ class RecordTests(ServiceCase):
         self.service.delete(first["id"], expected_version=1, request_id=str(uuid.uuid4()))
         self.assertEqual(self.service.warnings_for(second["id"]), [])
 
-    def test_source_duplicate_warning_is_recomputed_after_deletion(self) -> None:
+    def test_historical_source_duplicate_is_replaced_by_current_overlap(self) -> None:
         first = self.service.create(self.drive())
         second = self.service.create(self.drive())
         with self.database.transaction() as connection:
@@ -183,14 +183,17 @@ class RecordTests(ServiceCase):
                         utc_now_text(),
                     ),
                 )
-        self.assertIn(
-            {
-                "code": "seed_possible_duplicate",
-                "message": "Source contains another entry with the same start and duration",
-            },
-            self.service.warnings_for(second["id"]),
+        self.assertEqual(
+            {warning["code"] for warning in self.service.warnings_for(second["id"])},
+            {"overlap"},
         )
-        self.service.delete(first["id"], expected_version=1, request_id=str(uuid.uuid4()))
+        self.service.update(
+            second["id"],
+            self.drive(datetime(2026, 7, 20, 13, tzinfo=self.zone)),
+            expected_version=1,
+            request_id=str(uuid.uuid4()),
+        )
+        self.assertEqual(self.service.warnings_for(first["id"]), [])
         self.assertEqual(self.service.warnings_for(second["id"]), [])
 
     def test_retry_stale_delete_missing_reverse_and_midnight_guards(self) -> None:
@@ -616,6 +619,44 @@ class SeedParserTests(unittest.TestCase):
         self.assertTrue(all(row.warnings for row in rows))
         self.assertTrue(all(row.drive.road_type == "local" for row in rows))
         self.assertNotEqual(rows[0].drive_id, rows[1].drive_id)
+
+    def test_seed_duplicates_are_persisted_as_drives_not_warnings(self) -> None:
+        pdf_text = "\n".join(
+            [
+                "08/10/2025 6:27 PM 0h 8m Local Sean Ahern",
+                "08/10/2025 6:27 PM 0h 8m Local Sean Ahern",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_path = root / "seed.pdf"
+            log_path = root / "log.txt"
+            pdf_path.write_bytes(b"pdf")
+            log_path.write_text("* 2026-07-24 11:10-11:31: local roads")
+            database = Database(root / "state.sqlite3")
+            database.initialize()
+            with mock.patch("driving_log.seed.extract_pdf", return_value=pdf_text):
+                self.assertEqual(apply_seed(database, pdf_path, log_path)["created"], 3)
+
+            connection = database.connect_readonly()
+            try:
+                persisted = connection.execute(
+                    "SELECT COUNT(*) FROM drive_warnings WHERE warning_code=?",
+                    ("seed_possible_duplicate",),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+            self.assertEqual(persisted, 0)
+            records = RecordService(database)
+            duplicate_drives = [
+                drive for drive in records.list_drives() if drive["source"] == "seed_pdf"
+            ]
+            self.assertEqual(len(duplicate_drives), 2)
+            for drive in duplicate_drives:
+                self.assertEqual(
+                    {warning["code"] for warning in records.warnings_for(drive["id"])},
+                    {"overlap"},
+                )
 
     def test_text_parser_understands_ampm_and_infers_final_duration(self) -> None:
         text = "\n".join(
