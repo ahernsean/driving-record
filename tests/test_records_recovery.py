@@ -28,7 +28,7 @@ from driving_log.archive import (
     verify_archive,
 )
 from driving_log.csv_backup import CSV_COLUMNS, LEGACY_CSV_COLUMNS, export_csv, import_csv
-from driving_log.db import Database
+from driving_log.db import Database, utc_now_text
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.seed import (
     apply_seed,
@@ -163,6 +163,33 @@ class RecordTests(ServiceCase):
         totals = self.service.totals()
         self.assertEqual(totals["total_minutes"], 601)
         self.assertEqual(totals["weeks"][0]["overage_minutes"], 1)  # type: ignore[index]
+        self.service.delete(first["id"], expected_version=1, request_id=str(uuid.uuid4()))
+        self.assertEqual(self.service.warnings_for(second["id"]), [])
+
+    def test_source_duplicate_warning_is_recomputed_after_deletion(self) -> None:
+        first = self.service.create(self.drive())
+        second = self.service.create(self.drive())
+        with self.database.transaction() as connection:
+            for drive in (first, second):
+                connection.execute(
+                    """
+                    INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        drive["id"],
+                        "seed_possible_duplicate",
+                        "Source contains another entry with the same start and duration",
+                        utc_now_text(),
+                    ),
+                )
+        self.assertIn(
+            {
+                "code": "seed_possible_duplicate",
+                "message": "Source contains another entry with the same start and duration",
+            },
+            self.service.warnings_for(second["id"]),
+        )
         self.service.delete(first["id"], expected_version=1, request_id=str(uuid.uuid4()))
         self.assertEqual(self.service.warnings_for(second["id"]), [])
 
