@@ -220,8 +220,9 @@ class WebTests(unittest.TestCase):
                     # Work in UTC first so the synthetic five-minute drive remains
                     # valid across DST gaps and folds.
                     corrected_end_local = (
-                        datetime.fromisoformat(live_started_at_utc.replace("Z", "+00:00"))
-                        .astimezone(UTC)
+                        datetime.fromisoformat(
+                            live_started_at_utc.replace("Z", "+00:00")
+                        ).astimezone(UTC)
                         + timedelta(minutes=5)
                     ).astimezone(ZoneInfo(DEFAULT_TIMEZONE))
                     finalization_data = {
