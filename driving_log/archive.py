@@ -27,6 +27,9 @@ REQUIRED_TABLES = {
     "import_rows",
     "audit_events",
 }
+SCHEMA_TABLES = {
+    3: {"supervisor_profiles"},
+}
 
 
 def _sha256(path: Path) -> str:
@@ -145,7 +148,12 @@ def verify_archive(path: Path) -> dict[str, object]:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        if not REQUIRED_TABLES.issubset(tables):
+        schema_version = int(manifest.get("schema_version", -1))
+        required_tables = set(REQUIRED_TABLES)
+        for version, version_tables in SCHEMA_TABLES.items():
+            if schema_version >= version:
+                required_tables.update(version_tables)
+        if not required_tables.issubset(tables):
             connection.close()
             raise ValueError("archive database is missing required authoritative tables")
         migrations = connection.execute(

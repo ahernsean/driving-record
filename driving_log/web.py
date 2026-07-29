@@ -17,6 +17,7 @@ from driving_log.archive import create_archive
 from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
+from driving_log.dmv import DmvExportService, SupervisorProfileService, mask_license
 from driving_log.live import LiveDriveService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.solar import apex_daylight_window, resolve_local
@@ -101,6 +102,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     asset_version = asset_digest.hexdigest()[:12]
     records = RecordService(database)
     live = LiveDriveService(database)
+    profiles = SupervisorProfileService(database)
+    dmv = DmvExportService(database)
 
     @app.middleware("http")
     async def prevent_stale_html(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -441,6 +444,65 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             raise HTTPException(status_code=400, detail="CSV file is required")
         import_csv(database, await upload.read(), upload.filename or "upload.csv")
         return redirect("/imports")
+
+    @app.get("/dmv", response_class=HTMLResponse)
+    async def dmv_page(request: Request) -> HTMLResponse:
+        stored_profiles = [
+            {
+                **dict(profile),
+                "masked_license": mask_license(str(profile["dl_number"])),
+            }
+            for profile in profiles.list_profiles()
+        ]
+        return templates.TemplateResponse(
+            request,
+            "dmv.html",
+            common(
+                request,
+                title="DMV driving record",
+                profiles=stored_profiles,
+                drive_supervisors=profiles.distinct_drive_names(),
+                review=dmv.review(),
+            ),
+        )
+
+    @app.post("/dmv/profiles")
+    async def dmv_profile_save(request: Request) -> RedirectResponse:
+        form = await read_form(request)
+        profile_id = str(form.get("profile_id", "")).strip() or None
+        expected_text = str(form.get("version", "")).strip()
+        profiles.save(
+            display_name=str(form["display_name"]),
+            dl_number=str(form["dl_number"]),
+            dl_state=str(form["dl_state"]),
+            request_id=str(form["request_id"]),
+            profile_id=profile_id,
+            expected_version=int(expected_text) if expected_text else None,
+            actor_identity=_actor(request),
+        )
+        return redirect("/dmv")
+
+    @app.post("/dmv/profiles/{profile_id}/delete")
+    async def dmv_profile_delete(request: Request, profile_id: str) -> RedirectResponse:
+        form = await read_form(request)
+        profiles.delete(
+            profile_id,
+            expected_version=int(str(form["version"])),
+            request_id=str(form["request_id"]),
+            actor_identity=_actor(request),
+        )
+        return redirect("/dmv")
+
+    @app.get("/dmv/export")
+    async def dmv_download() -> Response:
+        return Response(
+            dmv.generate(),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": 'attachment; filename="Daniel-driving-log-DL-4A.pdf"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.get("/archives", response_class=HTMLResponse)
     async def archives_page(request: Request) -> HTMLResponse:

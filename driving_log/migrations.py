@@ -142,8 +142,24 @@ SCHEMA_V2 = """
 ALTER TABLE drives ADD COLUMN end_location TEXT NOT NULL DEFAULT '';
 """
 
+SCHEMA_V3 = """
+CREATE TABLE supervisor_profiles (
+    id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL UNIQUE,
+    dl_number TEXT NOT NULL,
+    dl_state TEXT NOT NULL CHECK (
+      length(dl_state) = 2 AND dl_state = upper(dl_state)
+    ),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_schema", SCHEMA_V1),
     Migration(2, "drive_end_location", SCHEMA_V2),
+    Migration(3, "supervisor_profiles", SCHEMA_V3),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

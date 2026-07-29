@@ -119,6 +119,11 @@ h2 { font-size: 1.2rem; }
 .drive-row em { color: #d97706; font-style: normal; font-weight: 700; }
 .stacked-form { display: grid; gap: 1rem; }
 .stacked-form label { display: grid; gap: .4rem; font-weight: 650; }
+.muted { color: var(--muted); }
+.profile-card { display: grid; gap: .5rem; margin-bottom: .75rem; }
+.profile-card details { margin-top: .25rem; }
+.profile-card summary { cursor: pointer; font-weight: 700; }
+.profile-card details form { margin-top: 1rem; }
 input, textarea, select {
   width: 100%; min-height: 3rem; border: 1px solid var(--border); border-radius: .7rem;
   padding: .7rem; background: var(--panel); color: var(--text);

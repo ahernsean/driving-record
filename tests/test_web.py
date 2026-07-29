@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import io
 import re
 import tempfile
 import unittest
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import anyio
 import httpx
+from pypdf import PdfReader
 
 from driving_log.app import create_app
-from driving_log.config import Settings
+from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.web import _format_local_datetime, _parse_local
 
 
@@ -179,6 +182,7 @@ class WebTests(unittest.TestCase):
                     live_state = await first.get("/live/state")
                     self.assertEqual(live_state.status_code, 200)
                     self.assertIsNotNone(live_state.json()["live"])
+                    live_started_at_utc = str(live_state.json()["live"]["started_at_utc"])
                 async with httpx.AsyncClient(
                     transport=transport,
                     base_url="http://testserver",
@@ -213,13 +217,20 @@ class WebTests(unittest.TestCase):
                         r'name="started_at_local" value="([^"]+)"', completion.text
                     )
                     self.assertIsNotNone(start_match)
-                    # The HTTP scenario is intentionally short, so correct the end into
-                    # the future enough to produce a valid minute-based record.
+                    # Work in UTC first so the synthetic five-minute drive remains
+                    # valid across DST gaps and folds.
+                    corrected_end_local = (
+                        datetime.fromisoformat(
+                            live_started_at_utc.replace("Z", "+00:00")
+                        ).astimezone(UTC)
+                        + timedelta(minutes=5)
+                    ).astimezone(ZoneInfo(DEFAULT_TIMEZONE))
                     finalization_data = {
                         "request_id": str(uuid.uuid4()),
                         "road_type": "local",
                         "started_at_local": start_match.group(1),  # type: ignore[union-attr]
-                        "ended_at_local": "2026-07-27T12:00",
+                        "ended_at_local": corrected_end_local.strftime("%Y-%m-%dT%H:%M"),
+                        "end_fold": str(corrected_end_local.fold),
                         "end_location": "Home",
                     }
                     finalized = await newest.post(
@@ -273,6 +284,80 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertEqual(cancelled.status_code, 303)
                 self.assertEqual(cancelled.headers["location"], "/")
+
+        self.run_async(scenario)
+
+    def test_dmv_profile_and_pdf_download_flow(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                initial = await client.get("/dmv")
+                self.assertEqual(initial.status_code, 200)
+                self.assertIn("Add license information", initial.text)
+                created = await client.post(
+                    "/dmv/profiles",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "display_name": "Sean Ahern",
+                        "dl_number": "SYNTHETIC-1234",
+                        "dl_state": "NC",
+                    },
+                )
+                self.assertEqual(created.status_code, 303)
+                self.assertEqual(created.headers["location"], "/dmv")
+                profile_page = await client.get("/dmv")
+                self.assertIn("••••••••••1234", profile_page.text)
+                self.assertIn("SYNTHETIC-1234", profile_page.text)
+                profile_id = re.search(r'name="profile_id" value="([^"]+)"', profile_page.text)
+                self.assertIsNotNone(profile_id)
+                selected_profile_id = profile_id.group(1)  # type: ignore[union-attr]
+                updated = await client.post(
+                    "/dmv/profiles",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "profile_id": selected_profile_id,
+                        "version": "1",
+                        "display_name": "Sean Ahern",
+                        "dl_number": "UPDATED-5678",
+                        "dl_state": "NC",
+                    },
+                )
+                self.assertEqual(updated.status_code, 303)
+
+                drive = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "driver_name": "Daniel Ahern",
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:00",
+                        "ended_at_local": "2026-07-20T12:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(drive.status_code, 303)
+                dashboard = await client.get("/")
+                self.assertNotIn("SYNTHETIC-1234", dashboard.text)
+                download = await client.get("/dmv/export")
+                self.assertEqual(download.status_code, 200)
+                self.assertEqual(download.headers["cache-control"], "no-store")
+                self.assertIn("attachment", download.headers["content-disposition"])
+                reader = PdfReader(io.BytesIO(download.content))
+                self.assertEqual(len(reader.pages), 2)
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                self.assertIn("UPDATED-5678, NC", text)
+                deleted = await client.post(
+                    f"/dmv/profiles/{selected_profile_id}/delete",
+                    data={"request_id": str(uuid.uuid4()), "version": "2"},
+                )
+                self.assertEqual(deleted.status_code, 303)
+                self.assertNotIn("UPDATED-5678", (await client.get("/dmv")).text)
 
         self.run_async(scenario)
 

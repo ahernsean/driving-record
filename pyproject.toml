@@ -11,7 +11,9 @@ dependencies = [
   "astral==3.2",
   "fastapi==0.139.2",
   "jinja2==3.1.6",
+  "pypdf==6.14.2",
   "python-multipart==0.0.32",
+  "reportlab==5.0.0",
   "tzdata==2026.3",
   "uvicorn==0.51.0",
 ]
@@ -33,7 +35,7 @@ driving-log = "driving_log.cli:main"
 include = ["driving_log*"]
 
 [tool.setuptools.package-data]
-driving_log = ["templates/*.html", "static/*"]
+driving_log = ["assets/*.pdf", "templates/*.html", "static/*"]
 
 [tool.ruff]
 line-length = 100

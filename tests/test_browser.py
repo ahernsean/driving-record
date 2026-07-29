@@ -145,6 +145,17 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert recovered.locator('input[name="acknowledge_warnings"]').count() == 0
                 assert recovered.locator('input[name="supervisor_dl_number"]').count() == 0
                 assert recovered.locator('input[name="supervisor_dl_state"]').count() == 0
+                recovered.goto(f"{url}/dmv")
+                recovered.locator('input[name="display_name"]').fill("Sean Ahern")
+                recovered.locator('input[name="dl_number"]').fill("SYNTHETIC-1234")
+                recovered.locator('input[name="dl_state"]').fill("NC")
+                with recovered.expect_navigation():
+                    recovered.get_by_role("button", name="Save supervising driver").click()
+                assert recovered.get_by_text("••••••••••1234, NC").is_visible()
+                overflow = recovered.evaluate(
+                    "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+                )
+                assert overflow <= 0
                 fresh.close()
                 browser.close()
         finally:
