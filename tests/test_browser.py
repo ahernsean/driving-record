@@ -82,11 +82,37 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert "Daniel Driving Log" in page.title()
                 assert page.locator(".progress-card").is_visible()
                 assert page.locator(".progress-arc-total").is_visible()
-                gauge = page.locator(".progress-visual svg").bounding_box()
-                percent = page.locator(".progress-layout > .progress-percent").bounding_box()
-                assert gauge is not None
-                assert percent is not None
-                assert percent["y"] >= gauge["y"] + gauge["height"]
+                assert page.locator(".progress-label").is_visible()
+                assert page.locator(".progress-percent-value").is_visible()
+                assert page.locator(".progress-percent-caption").is_visible()
+                page.locator(".progress-percent-value").evaluate(
+                    "element => { element.textContent = '108%'; }"
+                )
+                assert page.locator(".progress-percent-value").text_content() == "108%"
+                collisions = page.locator(".progress-visual svg").evaluate(
+                    """svg => {
+                      const labels = [...svg.querySelectorAll('.progress-label text')]
+                        .map(label => ({
+                          text: label.textContent,
+                          bounds: label.getBBox(),
+                        }));
+                      const paths = [...svg.querySelectorAll(
+                        '.progress-track, .progress-arc'
+                      )];
+                      return paths.flatMap(path => {
+                        const length = path.getTotalLength();
+                        return Array.from({length: 101}, (_, index) =>
+                          path.getPointAtLength(length * index / 100)
+                        ).flatMap(point => labels.filter(label =>
+                          point.x >= label.bounds.x - 8 &&
+                          point.x <= label.bounds.x + label.bounds.width + 8 &&
+                          point.y >= label.bounds.y - 8 &&
+                          point.y <= label.bounds.y + label.bounds.height + 8
+                        ).map(label => ({path: path.className.baseVal, text: label.text})));
+                      });
+                    }"""
+                )
+                assert collisions == []
                 assert (
                     page.locator(".progress-arc-total").evaluate("el => getComputedStyle(el).fill")
                     == "none"

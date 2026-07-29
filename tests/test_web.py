@@ -121,7 +121,7 @@ class WebTests(unittest.TestCase):
                 self.assertIn(
                     'aria-label="2 percent of required driving completed"', dashboard.text
                 )
-                self.assertIn("<strong>2%</strong>", dashboard.text)
+                self.assertIn(">2%</text>", dashboard.text)
                 self.assertNotIn("1.7%", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
@@ -223,14 +223,14 @@ class WebTests(unittest.TestCase):
                 self.assertIn(
                     'aria-label="1 percent of required driving completed"', dashboard.text
                 )
-                self.assertIn("<strong>1%</strong>", dashboard.text)
+                self.assertIn(">1%</text>", dashboard.text)
 
                 await add_drive(2, 72)
                 dashboard = await client.get("/")
                 self.assertIn(
                     'aria-label="3 percent of required driving completed"', dashboard.text
                 )
-                self.assertIn("<strong>3%</strong>", dashboard.text)
+                self.assertIn(">3%</text>", dashboard.text)
 
                 for day in range(3, 13):
                     await add_drive(day, 300)
@@ -240,14 +240,21 @@ class WebTests(unittest.TestCase):
                 self.assertIn(
                     'aria-label="99 percent of required driving completed"', dashboard.text
                 )
-                self.assertIn("<strong>99%</strong>", dashboard.text)
+                self.assertIn(">99%</text>", dashboard.text)
 
                 await add_drive(15, 1)
                 dashboard = await client.get("/")
                 self.assertIn(
                     'aria-label="100 percent of required driving completed"', dashboard.text
                 )
-                self.assertIn("<strong>100%</strong>", dashboard.text)
+                self.assertIn(">100%</text>", dashboard.text)
+
+                await add_drive(16, 288)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="108 percent of required driving completed"', dashboard.text
+                )
+                self.assertIn(">108%</text>", dashboard.text)
 
         self.run_async(scenario)
 
