@@ -19,6 +19,7 @@ from pypdf import PdfReader
 from driving_log.app import create_app
 from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.db import utc_now_text
+from driving_log.migrations import LATEST_SCHEMA_VERSION
 from driving_log.web import _format_local_datetime, _parse_local
 
 
@@ -255,6 +256,28 @@ class WebTests(unittest.TestCase):
             _parse_local("2026-11-01T01:30"),
             datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
         )
+
+    def test_archive_schema_mismatch_requests_restart_without_archive(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                with self.app.state.database.transaction() as connection:
+                    connection.execute(
+                        "INSERT INTO schema_migrations VALUES (?, 'future', 'future', ?)",
+                        (LATEST_SCHEMA_VERSION + 1, utc_now_text()),
+                    )
+                response = await client.post("/archives", data={})
+                self.assertEqual(response.status_code, 503)
+                self.assertIn("restart driving-log-web.service", response.json()["detail"])
+                self.assertEqual(list(self.settings.archive_dir.glob("*.tar.gz")), [])
+
+        self.run_async(scenario)
 
     def test_dashboard_progress_rounds_half_up_without_early_completion(self) -> None:
         async def scenario() -> None:

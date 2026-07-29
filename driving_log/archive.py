@@ -32,6 +32,10 @@ SCHEMA_TABLES = {
 }
 
 
+class ArchiveSchemaTooNewError(ValueError):
+    pass
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -73,10 +77,7 @@ def create_archive(database: Database, archive_dir: Path, out: Path | None = Non
     with tempfile.TemporaryDirectory(dir=target_dir) as temporary:
         workspace = Path(temporary)
         snapshot = workspace / "database.sqlite3"
-        # A snapshot is read-only work. Reapplying WAL mode here would need a
-        # write lock and can fail while the web application is serving a
-        # concurrent request.
-        source = database.connect_readonly()
+        source = database.connect()
         destination = sqlite3.connect(snapshot)
         source.backup(destination)
         destination.close()
@@ -92,6 +93,11 @@ def create_archive(database: Database, archive_dir: Path, out: Path | None = Non
         ).fetchone()
         schema_connection.close()
         schema_version = int(schema_row[0])
+        if schema_version > LATEST_SCHEMA_VERSION:
+            raise ArchiveSchemaTooNewError(
+                f"database schema {schema_version} is newer than the running application "
+                f"supports ({LATEST_SCHEMA_VERSION}); restart driving-log-web.service and retry"
+            )
         manifest = {
             "archive_format": ARCHIVE_FORMAT,
             "application_version": __version__,
@@ -139,7 +145,7 @@ def verify_archive(path: Path) -> dict[str, object]:
         if manifest.get("archive_format") != ARCHIVE_FORMAT:
             raise ValueError("unsupported archive format")
         if int(manifest.get("schema_version", -1)) > LATEST_SCHEMA_VERSION:
-            raise ValueError("archive schema is newer than this application")
+            raise ArchiveSchemaTooNewError("archive schema is newer than this application")
         snapshot = workspace / "database.sqlite3"
         if _sha256(snapshot) != manifest.get("database_sha256"):
             raise ValueError("archive database hash mismatch")

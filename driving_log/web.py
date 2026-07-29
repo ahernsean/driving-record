@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData, UploadFile
 from starlette.middleware.base import RequestResponseEndpoint
 
-from driving_log.archive import create_archive
+from driving_log.archive import ArchiveSchemaTooNewError, create_archive
 from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
@@ -528,5 +528,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/archives")
     async def archive_create_web(request: Request) -> RedirectResponse:
         await read_form(request)
-        create_archive(database, settings.archive_dir)
+        try:
+            create_archive(database, settings.archive_dir)
+        except ArchiveSchemaTooNewError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return redirect("/archives")

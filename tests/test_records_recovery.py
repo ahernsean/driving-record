@@ -22,6 +22,7 @@ import pytest
 
 from driving_log.archive import (
     ARCHIVE_FORMAT,
+    ArchiveSchemaTooNewError,
     application_lock,
     create_archive,
     restore_archive,
@@ -29,6 +30,7 @@ from driving_log.archive import (
 )
 from driving_log.csv_backup import CSV_COLUMNS, LEGACY_CSV_COLUMNS, export_csv, import_csv
 from driving_log.db import Database, utc_now_text
+from driving_log.migrations import LATEST_SCHEMA_VERSION
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.seed import (
     apply_seed,
@@ -484,14 +486,16 @@ class ArchiveTests(ServiceCase):
         restored.database.initialize()
         self.assertIsNone(restored.get(drive["id"])["deleted_at"])
 
-    def test_archive_snapshot_does_not_reconfigure_the_live_database(self) -> None:
-        with mock.patch.object(
-            self.database,
-            "connect",
-            side_effect=AssertionError("archive creation must not change journal mode"),
-        ):
-            archive = create_archive(self.database, Path(self.temporary.name) / "archives")
-        self.assertTrue(verify_archive(archive)["verified"])
+    def test_archive_rejects_newer_live_schema_without_publishing_bundle(self) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO schema_migrations VALUES (?, 'future', 'future', ?)",
+                (LATEST_SCHEMA_VERSION + 1, utc_now_text()),
+            )
+        archive_dir = Path(self.temporary.name) / "archives"
+        with self.assertRaisesRegex(ArchiveSchemaTooNewError, "restart"):
+            create_archive(self.database, archive_dir)
+        self.assertEqual(list(archive_dir.glob("*.tar.gz")), [])
 
     @pytest.mark.security
     def test_restore_requires_confirmation_and_hash_is_checked(self) -> None:
