@@ -187,7 +187,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert start_input.input_value()
                 original_end = end_input.input_value()
                 assert original_end
-                duration_minutes.fill("1")
+                duration_minutes.fill("2")
                 assert end_input.input_value() != original_end
                 assert recovered.locator("[data-time-editor]").is_visible()
                 assert recovered.get_by_text("Repeated-time options").count() == 0

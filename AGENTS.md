@@ -7,13 +7,13 @@ terminal output. An empty or prematurely returned tool response is not test
 evidence.
 
 For the current workflow, run the quality and non-browser suite exactly as CI
-does:
+does (with `PYTHONPATH=.`):
 
 ```sh
-ruff check .
-ruff format --check .
-mypy
-pytest -m "not browser" --cov --cov-report=term-missing --cov-fail-under=95
+PYTHONPATH=. .venv/bin/ruff check .
+PYTHONPATH=. .venv/bin/ruff format --check .
+PYTHONPATH=. .venv/bin/mypy
+PYTHONPATH=. .venv/bin/pytest -m "not browser" --cov --cov-report=term-missing --cov-fail-under=95
 git diff --check
 ```
 
