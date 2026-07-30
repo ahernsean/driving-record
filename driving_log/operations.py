@@ -88,6 +88,11 @@ def install_user_units(
     for name in UNIT_NAMES:
         shutil.copy2(source_dir / name, unit_dir / name)
     run_systemctl("daemon-reload")
+    run_systemctl(
+        "try-restart",
+        "driving-log-web.service",
+        "driving-log-archive.timer",
+    )
     return {
         "environment": str(environment_path),
         "unit_directory": str(unit_dir),

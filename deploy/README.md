@@ -15,6 +15,11 @@ loginctl enable-linger "$USER"
 tailscale serve --bg --http=8443 http://127.0.0.1:8766
 ```
 
+Re-running `./driving-log install` after an update reloads the units and restarts
+the web service and archive timer when they are already active. This keeps the
+running application schema support in step with migrations performed by
+one-shot commands.
+
 Before changing Serve, save `tailscale serve status --json` and verify the
 existing HTTP port 80 handler still forwards to Wordle on
 `127.0.0.1:8765`. Never use Funnel and never bind this application to a LAN or

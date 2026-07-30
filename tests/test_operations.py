@@ -135,7 +135,24 @@ class OperationTests(unittest.TestCase):
             self.assertIn(f"DRIVING_LOG_EXTERNAL_ARCHIVE_DIR={home / 'external'}", contents)
             unit_dir = Path(result["unit_directory"])
             self.assertEqual(len(list(unit_dir.iterdir())), 4)
-            self.assertEqual(systemctl.call_count, 2)
+            self.assertEqual(systemctl.call_count, 4)
+            self.assertEqual(
+                systemctl.call_args_list,
+                [
+                    mock.call("daemon-reload"),
+                    mock.call(
+                        "try-restart",
+                        "driving-log-web.service",
+                        "driving-log-archive.timer",
+                    ),
+                    mock.call("daemon-reload"),
+                    mock.call(
+                        "try-restart",
+                        "driving-log-web.service",
+                        "driving-log-archive.timer",
+                    ),
+                ],
+            )
 
             environment.write_text(
                 contents + "DRIVING_LOG_DATABASE=/custom/database.sqlite3\n",
