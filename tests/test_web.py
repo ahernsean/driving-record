@@ -304,6 +304,22 @@ class WebTests(unittest.TestCase):
                 self.assertIn("0h 45m day", grouped.text)
                 self.assertIn("0h 30m night", grouped.text)
 
+                weather_filtered = await client.get("/drives?weather=clear&weather=rain")
+                self.assertIn("2 drives · 1h 15m", weather_filtered.text)
+                self.assertIn(
+                    'type="checkbox" name="weather" value="clear" checked', weather_filtered.text
+                )
+                self.assertIn(
+                    'type="checkbox" name="weather" value="rain" checked', weather_filtered.text
+                )
+
+                time_grouped = await client.get("/drives?group_by=part_of_day")
+                self.assertIn('<span class="group-label">Night</span>', time_grouped.text)
+                self.assertIn("Morning (5 AM–12 PM)", time_grouped.text)
+                self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
+                self.assertIn("Last week", time_grouped.text)
+                self.assertIn("Last year", time_grouped.text)
+
         self.run_async(scenario)
 
     def test_timestamp_formatter_uses_local_date_and_dst_offset(self) -> None:

@@ -71,7 +71,21 @@ def _duration_parts(minutes: int) -> dict[str, int]:
     }
 
 
-PARTS_OF_DAY = ("morning", "afternoon", "evening", "night")
+TIME_OF_DAY_OPTIONS = (
+    ("morning", "Morning (5 AM–12 PM)"),
+    ("afternoon", "Afternoon (12 PM–5 PM)"),
+    ("evening", "Evening (5 PM–9 PM)"),
+    ("night", "Night (9 PM–5 AM)"),
+)
+PARTS_OF_DAY = tuple(value for value, _ in TIME_OF_DAY_OPTIONS)
+WEATHER_LABELS = (
+    ("clear", "Clear"),
+    ("rain", "Rain"),
+    ("cloudy", "Cloudy"),
+    ("wet", "Wet roads"),
+    ("fog", "Fog"),
+    ("unspecified", "Unspecified"),
+)
 GROUP_BY_OPTIONS = (
     ("none", "No grouping"),
     ("date", "Date"),
@@ -93,6 +107,27 @@ def _part_of_day(value: str | datetime, timezone_name: str) -> str:
     if hour < 21:
         return "evening"
     return "night"
+
+
+def _time_of_day_group(row: sqlite3.Row) -> str:
+    if int(row["night_minutes"]):
+        return "night"
+    return _part_of_day(row["started_at_utc"], row["timezone_name"])
+
+
+def _weather_categories(value: str | None) -> tuple[str, ...]:
+    normalized = (value or "").casefold()
+    categories = []
+    for category, terms in (
+        ("clear", ("clear",)),
+        ("rain", ("rain",)),
+        ("cloudy", ("cloud",)),
+        ("wet", ("wet",)),
+        ("fog", ("fog",)),
+    ):
+        if any(term in normalized for term in terms):
+            categories.append(category)
+    return tuple(categories or ["unspecified"])
 
 
 def _local_datetime_in_zone(value: str | datetime, timezone_name: str) -> datetime:
@@ -150,14 +185,15 @@ def _drive_group_key(row: sqlite3.Row, group_by: str) -> tuple[str, str]:
             return ("mixed", "Day and night")
         return ("day" if day else "night", "Day" if day else "Night")
     if group_by == "part_of_day":
-        part = _part_of_day(str(row["started_at_utc"]), str(row["timezone_name"]))
+        part = _time_of_day_group(row)
         return (part, part.title())
     if group_by == "road_type":
         road_type = str(row["road_type"])
         return (road_type, road_type.title())
     if group_by == "weather":
-        weather = str(row["weather"] or "").strip()
-        return (weather.casefold() or "unspecified", weather or "Unspecified")
+        categories = _weather_categories(row["weather"])
+        labels = dict(WEATHER_LABELS)
+        return ("-".join(categories), " · ".join(labels[category] for category in categories))
     if group_by == "duration":
         label = _duration_bucket(int(row["duration_minutes"]))
         return (label, label)
@@ -288,14 +324,24 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 "day_night",
                 "part_of_day",
                 "road_type",
-                "weather",
                 "min_duration",
                 "max_duration",
                 "group_by",
             )
         }
+        weather_filters = tuple(request.query_params.getlist("weather"))
         period = raw_filters["period"] or "all"
-        if period not in {"all", "today", "week", "month", "last_month", "year", "custom"}:
+        if period not in {
+            "all",
+            "today",
+            "week",
+            "last_week",
+            "month",
+            "last_month",
+            "year",
+            "last_year",
+            "custom",
+        }:
             raise ValueError("Choose a valid date range")
         group_by = raw_filters["group_by"] or "none"
         if group_by not in {value for value, _ in GROUP_BY_OPTIONS}:
@@ -304,17 +350,31 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             raise ValueError("Choose day or night")
         if raw_filters["part_of_day"] not in {"", *PARTS_OF_DAY}:
             raise ValueError("Choose a valid time of day")
+        if raw_filters["supervisor"] not in {"", "none"}:
+            known_supervisors = {
+                str(row["supervisor_name"])
+                for row in records.list_drives()
+                if row["supervisor_name"]
+            }
+            if raw_filters["supervisor"] not in known_supervisors:
+                raise ValueError("Choose a valid supervising driver")
+        weather_keys = {value for value, _ in WEATHER_LABELS}
+        if any(weather not in weather_keys for weather in weather_filters):
+            raise ValueError("Choose valid weather conditions")
 
+        today = datetime.now(ZONE).date()
         start_date = _parse_filter_date(raw_filters["start_date"], "Start date")
         end_date = _parse_filter_date(raw_filters["end_date"], "End date")
         if start_date and end_date and start_date > end_date:
             raise ValueError("Start date must not be after end date")
         if period != "custom":
-            today = datetime.now(ZONE).date()
             if period == "today":
                 start_date = end_date = today
             elif period == "week":
                 start_date, end_date = today - timedelta(days=today.weekday()), today
+            elif period == "last_week":
+                end_date = today - timedelta(days=today.weekday() + 1)
+                start_date = end_date - timedelta(days=6)
             elif period == "month":
                 start_date, end_date = today.replace(day=1), today
             elif period == "last_month":
@@ -322,6 +382,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 start_date = end_date.replace(day=1)
             elif period == "year":
                 start_date, end_date = today.replace(month=1, day=1), today
+            elif period == "last_year":
+                start_date = today.replace(year=today.year - 1, month=1, day=1)
+                end_date = today.replace(year=today.year - 1, month=12, day=31)
+            if start_date and end_date:
+                raw_filters["start_date"] = start_date.isoformat()
+                raw_filters["end_date"] = end_date.isoformat()
         min_duration = _parse_filter_minutes(raw_filters["min_duration"], "Minimum duration")
         max_duration = _parse_filter_minutes(raw_filters["max_duration"], "Maximum duration")
         if min_duration is not None and max_duration is not None and min_duration > max_duration:
@@ -334,7 +400,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 continue
             if end_date and local.date() > end_date:
                 continue
-            if raw_filters["supervisor"] and row["supervisor_name"] != raw_filters["supervisor"]:
+            if raw_filters["supervisor"] == "none" and row["supervisor_name"]:
+                continue
+            if raw_filters["supervisor"] not in {"", "none"} and (
+                row["supervisor_name"] != raw_filters["supervisor"]
+            ):
                 continue
             if raw_filters["day_night"] == "day" and not row["day_minutes"]:
                 continue
@@ -348,7 +418,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 continue
             if raw_filters["road_type"] and row["road_type"] != raw_filters["road_type"]:
                 continue
-            if raw_filters["weather"] and row["weather"] != raw_filters["weather"]:
+            if weather_filters and not set(weather_filters).intersection(
+                _weather_categories(row["weather"])
+            ):
                 continue
             if min_duration is not None and row["duration_minutes"] < min_duration:
                 continue
@@ -413,6 +485,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 title="Drive history",
                 drives=enriched,
                 filters=raw_filters,
+                weather_filters=weather_filters,
                 supervisors=sorted(
                     {
                         str(row["supervisor_name"])
@@ -421,10 +494,42 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                     },
                     key=str.casefold,
                 ),
-                weather_options=sorted(
-                    {str(row["weather"]) for row in records.list_drives() if row["weather"]},
-                    key=str.casefold,
-                ),
+                weather_options=[
+                    (value, label)
+                    for value, label in WEATHER_LABELS
+                    if any(
+                        value in _weather_categories(row["weather"])
+                        for row in records.list_drives()
+                    )
+                ],
+                time_of_day_options=TIME_OF_DAY_OPTIONS,
+                date_ranges={
+                    "all": {"start": "", "end": ""},
+                    "today": {"start": today.isoformat(), "end": today.isoformat()},
+                    "week": {
+                        "start": (today - timedelta(days=today.weekday())).isoformat(),
+                        "end": today.isoformat(),
+                    },
+                    "last_week": {
+                        "start": (today - timedelta(days=today.weekday() + 7)).isoformat(),
+                        "end": (today - timedelta(days=today.weekday() + 1)).isoformat(),
+                    },
+                    "month": {"start": today.replace(day=1).isoformat(), "end": today.isoformat()},
+                    "last_month": {
+                        "start": (today.replace(day=1) - timedelta(days=1))
+                        .replace(day=1)
+                        .isoformat(),
+                        "end": (today.replace(day=1) - timedelta(days=1)).isoformat(),
+                    },
+                    "year": {
+                        "start": today.replace(month=1, day=1).isoformat(),
+                        "end": today.isoformat(),
+                    },
+                    "last_year": {
+                        "start": today.replace(year=today.year - 1, month=1, day=1).isoformat(),
+                        "end": today.replace(year=today.year - 1, month=12, day=31).isoformat(),
+                    },
+                },
                 totals=totals,
                 groups=groups,
                 group_by=group_by,

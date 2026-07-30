@@ -120,12 +120,24 @@ h2 { font-size: 1.2rem; }
 .history-controls > summary, .drive-group > summary { cursor: pointer; font-weight: 750; }
 .history-filter { display: grid; gap: .8rem; margin-top: 1rem; }
 .history-filter label { display: grid; gap: .4rem; font-weight: 650; }
+.history-filter input, .history-filter select { min-width: 0; }
+.history-filter .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.history-filter .two-column > label, .history-filter .two-column > fieldset { min-width: 0; }
 .filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+.weather-filter { grid-template-columns: 1fr 1fr; align-content: start; margin: 0; }
+.weather-filter legend { grid-column: 1 / -1; font-weight: 650; }
+.weather-filter .choice { min-height: 2.3rem; }
 .filtered-totals { display: grid; gap: .2rem; }
 .filtered-totals span, .drive-group summary small { color: var(--muted); }
 .drive-groups { display: grid; gap: .7rem; }
 .drive-group { margin: 0; }
-.drive-group > summary { display: flex; justify-content: space-between; gap: .75rem; }
+.drive-group > summary {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .6rem;
+  list-style: none;
+}
+.drive-group > summary::-webkit-details-marker { display: none; }
+.drive-group > summary::before { content: "▸"; font-size: 1.1rem; }
+.drive-group[open] > summary::before { content: "▾"; }
 .drive-group summary small { text-align: right; font-weight: 500; }
 .drive-group .drive-list { margin-top: .9rem; }
 .stacked-form { display: grid; gap: 1rem; }

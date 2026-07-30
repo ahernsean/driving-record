@@ -151,6 +151,19 @@
     updateDuration();
   });
 
+  document.querySelectorAll("form[data-history-filters]").forEach(form => {
+    const period = form.querySelector('select[name="period"]');
+    const start = form.querySelector('input[name="start_date"]');
+    const end = form.querySelector('input[name="end_date"]');
+    const ranges = JSON.parse(form.dataset.dateRanges || "{}");
+    period.addEventListener("change", () => {
+      const range = ranges[period.value];
+      if (!range) return;
+      start.value = range.start;
+      end.value = range.end;
+    });
+  });
+
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;
