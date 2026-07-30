@@ -263,8 +263,8 @@ class WebTests(unittest.TestCase):
                         "clear",
                     ),
                     (
-                        datetime(2026, 7, 21, 2, tzinfo=UTC),
-                        datetime(2026, 7, 21, 2, 30, tzinfo=UTC),
+                        datetime(2026, 7, 22, 2, tzinfo=UTC),
+                        datetime(2026, 7, 22, 2, 30, tzinfo=UTC),
                         "Alex Smith",
                         "local",
                         "rain",
@@ -323,6 +323,19 @@ class WebTests(unittest.TestCase):
                 self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
                 self.assertIn("Last week", time_grouped.text)
                 self.assertIn("Last year", time_grouped.text)
+
+                date_grouped = await client.get("/drives?group_by=date")
+                self.assertLess(
+                    date_grouped.text.index("Tuesday, Jul 21, 2026"),
+                    date_grouped.text.index("Monday, Jul 20, 2026"),
+                )
+
+                all_time = await client.get(
+                    "/drives?period=all&start_date=2026-07-21&end_date=2026-07-21"
+                )
+                self.assertIn("2 drives · 1h 15m", all_time.text)
+                self.assertIn('name="start_date" value=""', all_time.text)
+                self.assertIn('name="end_date" value=""', all_time.text)
 
         self.run_async(scenario)
 

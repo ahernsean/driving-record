@@ -365,11 +365,14 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             raise ValueError("Choose valid weather conditions")
 
         today = datetime.now(ZONE).date()
-        start_date = _parse_filter_date(raw_filters["start_date"], "Start date")
-        end_date = _parse_filter_date(raw_filters["end_date"], "End date")
-        if start_date and end_date and start_date > end_date:
-            raise ValueError("Start date must not be after end date")
-        if period != "custom":
+        start_date: date | None = None
+        end_date: date | None = None
+        if period == "custom":
+            start_date = _parse_filter_date(raw_filters["start_date"], "Start date")
+            end_date = _parse_filter_date(raw_filters["end_date"], "End date")
+            if start_date and end_date and start_date > end_date:
+                raise ValueError("Start date must not be after end date")
+        elif period != "all":
             if period == "today":
                 start_date = end_date = today
             elif period == "week":
@@ -390,6 +393,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             if start_date and end_date:
                 raw_filters["start_date"] = start_date.isoformat()
                 raw_filters["end_date"] = end_date.isoformat()
+        else:
+            raw_filters["start_date"] = ""
+            raw_filters["end_date"] = ""
         min_duration = _parse_filter_minutes(raw_filters["min_duration"], "Minimum duration")
         max_duration = _parse_filter_minutes(raw_filters["max_duration"], "Maximum duration")
         if min_duration is not None and max_duration is not None and min_duration > max_duration:
@@ -448,6 +454,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 group = grouped.setdefault(
                     key,
                     {
+                        "key": key,
                         "label": label,
                         "drives": [],
                         "minutes": 0,
@@ -462,7 +469,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                     row["night_minutes"]
                 )
             groups = list(grouped.values())
-            if group_by in {"part_of_day", "duration"}:
+            if group_by == "date":
+                groups.sort(key=lambda group: str(group["key"]), reverse=True)
+            elif group_by in {"part_of_day", "duration"}:
                 order = {
                     "morning": 0,
                     "afternoon": 1,
