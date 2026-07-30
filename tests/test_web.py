@@ -313,6 +313,20 @@ class WebTests(unittest.TestCase):
                     'type="checkbox" name="weather" value="rain" checked', weather_filtered.text
                 )
 
+                with_warning = records.list_drives()[0]
+                with self.app.state.database.transaction() as connection:
+                    connection.execute(
+                        "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                        (str(uuid.uuid4()), with_warning["id"], "review_needed", "Review this drive", ""),
+                    )
+                warnings_only = await client.get("/drives?warnings_only=1")
+                self.assertIn("1 drive · 0h 45m", warnings_only.text)
+                self.assertIn("0h 45m · highway", warnings_only.text)
+                self.assertNotIn("0h 30m · local", warnings_only.text)
+                self.assertIn(
+                    'type="checkbox" name="warnings_only" value="1" checked', warnings_only.text
+                )
+
                 time_grouped = await client.get("/drives?group_by=part_of_day")
                 self.assertIn(
                     '<span class="group-label">Nighttime (dusk–dawn)</span>',
@@ -329,6 +343,23 @@ class WebTests(unittest.TestCase):
                     date_grouped.text.index("Tuesday, Jul 21, 2026"),
                     date_grouped.text.index("Monday, Jul 20, 2026"),
                 )
+
+                records.create(
+                    DriveInput(
+                        driver_name="Daniel Ahern",
+                        supervisor_name="Alex Smith",
+                        supervisor_dl_number=None,
+                        supervisor_dl_state=None,
+                        started_at_utc=datetime(2026, 7, 20, 6, tzinfo=UTC),
+                        ended_at_utc=datetime(2026, 7, 20, 6, 30, tzinfo=UTC),
+                        road_type="local",
+                        weather="clear",
+                        timezone_name="America/Los_Angeles",
+                    ),
+                    request_id=str(uuid.uuid4()),
+                )
+                pacific_date_grouped = await client.get("/drives?group_by=date")
+                self.assertIn("Sunday, Jul 19, 2026", pacific_date_grouped.text)
 
                 all_time = await client.get(
                     "/drives?period=all&start_date=2026-07-21&end_date=2026-07-21"

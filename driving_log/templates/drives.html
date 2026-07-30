@@ -56,6 +56,7 @@
         <label>Road type
           <select name="road_type"><option value="">Any road type</option>{% for kind in ("local", "highway", "mixed", "unknown") %}<option value="{{ kind }}" {{ "selected" if filters.road_type == kind }}>{{ kind | title }}</option>{% endfor %}</select>
         </label>
+        <label class="choice"><input type="checkbox" name="warnings_only" value="1" {{ "checked" if filters.warnings_only }}> Warnings only</label>
       </div>
       <fieldset class="weather-filter"><legend>Weather</legend>{% for value, label in weather_options %}<label class="choice"><input type="checkbox" name="weather" value="{{ value }}" {{ "checked" if value in weather_filters }}> {{ label }}</label>{% endfor %}</fieldset>
       <div class="two-column">

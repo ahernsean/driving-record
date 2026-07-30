@@ -60,6 +60,11 @@ def _format_local_date(value: str | datetime) -> str:
     return f"{local.strftime('%A')}, {local.strftime('%b')} {local.day}, {local.year}"
 
 
+def _format_date_in_zone(value: str | datetime, timezone_name: str) -> str:
+    local = _local_datetime_in_zone(value, timezone_name)
+    return f"{local.strftime('%A')}, {local.strftime('%b')} {local.day}, {local.year}"
+
+
 def _local_input_value(value: str | datetime) -> str:
     return _local_datetime(value).strftime("%Y-%m-%dT%H:%M")
 
@@ -176,7 +181,10 @@ def _drive_group_key(row: sqlite3.Row, group_by: str) -> tuple[str, str]:
     # sqlite rows deliberately remain the source of truth; this is only presentation grouping.
     if group_by == "date":
         local = _local_datetime_in_zone(str(row["started_at_utc"]), str(row["timezone_name"]))
-        return (local.date().isoformat(), _format_local_date(str(row["started_at_utc"])))
+        return (
+            local.date().isoformat(),
+            _format_date_in_zone(str(row["started_at_utc"]), str(row["timezone_name"])),
+        )
     if group_by == "supervisor":
         name = str(row["supervisor_name"] or "").strip()
         return (name.casefold() or "unspecified", name or "Unspecified")
@@ -328,6 +336,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 "road_type",
                 "min_duration",
                 "max_duration",
+                "warnings_only",
                 "group_by",
             )
         }
@@ -350,6 +359,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             raise ValueError("Choose a valid grouping")
         if raw_filters["day_night"] not in {"", "day", "night"}:
             raise ValueError("Choose day or night")
+        if raw_filters["warnings_only"] not in {"", "1"}:
+            raise ValueError("Choose whether to show warnings only")
         if raw_filters["part_of_day"] not in {"", *PARTS_OF_DAY}:
             raise ValueError("Choose a valid time of day")
         if raw_filters["supervisor"] not in {"", "none"}:
@@ -401,6 +412,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         if min_duration is not None and max_duration is not None and min_duration > max_duration:
             raise ValueError("Minimum duration must not exceed maximum duration")
 
+        warnings = records.warnings_for_many()
         drives = []
         for row in records.list_drives():
             local = _local_datetime_in_zone(row["started_at_utc"], row["timezone_name"])
@@ -433,9 +445,10 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 continue
             if max_duration is not None and row["duration_minutes"] > max_duration:
                 continue
+            if raw_filters["warnings_only"] and not warnings.get(row["id"]):
+                continue
             drives.append(row)
 
-        warnings = records.warnings_for_many()
         enriched: list[dict[str, object]] = [
             {"row": row, "warnings": warnings.get(row["id"], [])} for row in drives
         ]
