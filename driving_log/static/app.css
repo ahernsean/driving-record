@@ -122,10 +122,13 @@ h2 { font-size: 1.2rem; }
 .history-filter label { display: grid; gap: .4rem; font-weight: 650; }
 .history-filter input, .history-filter select { min-width: 0; }
 .history-filter input[type="date"] {
-  display: block; inline-size: min(100%, calc(100vw - 4rem)); max-inline-size: 100%;
+  -webkit-appearance: none; appearance: none; box-sizing: border-box; display: block;
+  inline-size: 100% !important; max-inline-size: 100% !important; min-inline-size: 0 !important;
+  width: 100% !important; max-width: 100% !important; min-width: 0 !important;
 }
 .history-filter .two-column { grid-template-columns: minmax(0, 1fr); }
 .history-filter .two-column > label, .history-filter .two-column > fieldset { min-width: 0; }
+.date-filter-range { max-width: 100%; overflow: clip; }
 .filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
 .weather-filter { grid-template-columns: minmax(0, 1fr); align-content: start; min-width: 0; margin: 0; }
 .weather-filter legend { font-weight: 650; }
