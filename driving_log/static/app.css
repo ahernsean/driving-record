@@ -121,11 +121,11 @@ h2 { font-size: 1.2rem; }
 .history-filter { display: grid; gap: .8rem; margin-top: 1rem; }
 .history-filter label { display: grid; gap: .4rem; font-weight: 650; }
 .history-filter input, .history-filter select { min-width: 0; }
-.history-filter .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.history-filter .two-column { grid-template-columns: minmax(0, 1fr); }
 .history-filter .two-column > label, .history-filter .two-column > fieldset { min-width: 0; }
 .filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
-.weather-filter { grid-template-columns: 1fr 1fr; align-content: start; margin: 0; }
-.weather-filter legend { grid-column: 1 / -1; font-weight: 650; }
+.weather-filter { grid-template-columns: minmax(0, 1fr); align-content: start; min-width: 0; margin: 0; }
+.weather-filter legend { font-weight: 650; }
 .weather-filter .choice { min-height: 2.3rem; }
 .filtered-totals { display: grid; gap: .2rem; }
 .filtered-totals span, .drive-group summary small { color: var(--muted); }
@@ -195,5 +195,10 @@ fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; border: 1p
   .progress-details strong { font-size: 1rem; }
   .progress-details small { font-size: .7rem; }
   .two-column { grid-template-columns: 1fr; }
+}
+@media (min-width: 38rem) {
+  .history-filter .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .weather-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .weather-filter legend { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }

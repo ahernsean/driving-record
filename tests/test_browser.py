@@ -139,6 +139,13 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert start_box and end_box and panel_box
                 assert abs(start_box["width"] - end_box["width"]) <= 1
                 assert end_box["x"] + end_box["width"] <= panel_box["x"] + panel_box["width"]
+                assert (
+                    page.evaluate(
+                        "document.documentElement.scrollWidth - "
+                        "document.documentElement.clientWidth"
+                    )
+                    <= 0
+                )
                 assert page.locator('option[value="last_week"]').text_content() == "Last week"
                 assert page.locator('option[value="last_year"]').text_content() == "Last year"
                 page.goto(url)
