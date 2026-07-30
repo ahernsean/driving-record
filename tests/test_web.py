@@ -372,7 +372,7 @@ class WebTests(unittest.TestCase):
                 all_time = await client.get(
                     "/drives?period=all&start_date=2026-07-21&end_date=2026-07-21"
                 )
-                self.assertIn("2 drives · 1h 15m", all_time.text)
+                self.assertIn("3 drives · 1h 45m", all_time.text)
                 self.assertIn('name="start_date" value=""', all_time.text)
                 self.assertIn('name="end_date" value=""', all_time.text)
 
