@@ -75,7 +75,7 @@ TIME_OF_DAY_OPTIONS = (
     ("morning", "Morning (5 AM–12 PM)"),
     ("afternoon", "Afternoon (12 PM–5 PM)"),
     ("evening", "Evening (5 PM–9 PM)"),
-    ("night", "Night (9 PM–5 AM)"),
+    ("night", "Nighttime (solar)"),
 )
 PARTS_OF_DAY = tuple(value for value, _ in TIME_OF_DAY_OPTIONS)
 WEATHER_LABELS = (
@@ -113,6 +113,12 @@ def _time_of_day_group(row: sqlite3.Row) -> str:
     if int(row["night_minutes"]):
         return "night"
     return _part_of_day(row["started_at_utc"], row["timezone_name"])
+
+
+def _time_of_day_label(value: str) -> str:
+    if value == "night":
+        return "Nighttime (solar)"
+    return value.title()
 
 
 def _weather_categories(value: str | None) -> tuple[str, ...]:
@@ -186,7 +192,7 @@ def _drive_group_key(row: sqlite3.Row, group_by: str) -> tuple[str, str]:
         return ("day" if day else "night", "Day" if day else "Night")
     if group_by == "part_of_day":
         part = _time_of_day_group(row)
-        return (part, part.title())
+        return (part, _time_of_day_label(part))
     if group_by == "road_type":
         road_type = str(row["road_type"])
         return (road_type, road_type.title())
@@ -410,10 +416,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 continue
             if raw_filters["day_night"] == "night" and not row["night_minutes"]:
                 continue
+            selected_part = raw_filters["part_of_day"]
+            if selected_part == "night" and not row["night_minutes"]:
+                continue
             if (
-                raw_filters["part_of_day"]
-                and _part_of_day(row["started_at_utc"], row["timezone_name"])
-                != raw_filters["part_of_day"]
+                selected_part
+                and selected_part != "night"
+                and (_part_of_day(row["started_at_utc"], row["timezone_name"]) != selected_part)
             ):
                 continue
             if raw_filters["road_type"] and row["road_type"] != raw_filters["road_type"]:
@@ -466,14 +475,21 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                     "morning": 0,
                     "afternoon": 1,
                     "evening": 2,
-                    "night": 3,
+                    "nighttime (solar)": 3,
                     "under 30 minutes": 0,
                     "30–59 minutes": 1,
                     "1–2 hours": 2,
                     "2+ hours": 3,
                 }
                 groups.sort(
-                    key=lambda group: order.get(str(group["label"]).lower(), str(group["label"]))
+                    key=lambda group: (
+                        (
+                            0,
+                            order[str(group["label"]).lower()],
+                        )
+                        if str(group["label"]).lower() in order
+                        else (1, str(group["label"]).casefold())
+                    )
                 )
             else:
                 groups.sort(key=lambda group: str(group["label"]).casefold())

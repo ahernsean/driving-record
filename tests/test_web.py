@@ -314,8 +314,11 @@ class WebTests(unittest.TestCase):
                 )
 
                 time_grouped = await client.get("/drives?group_by=part_of_day")
-                self.assertIn('<span class="group-label">Night</span>', time_grouped.text)
+                self.assertIn(
+                    '<span class="group-label">Nighttime (solar)</span>', time_grouped.text
+                )
                 self.assertIn("Morning (5 AM–12 PM)", time_grouped.text)
+                self.assertIn("Nighttime (solar)", time_grouped.text)
                 self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
                 self.assertIn("Last week", time_grouped.text)
                 self.assertIn("Last year", time_grouped.text)
