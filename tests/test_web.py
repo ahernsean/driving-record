@@ -21,7 +21,7 @@ from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.db import utc_now_text
 from driving_log.migrations import LATEST_SCHEMA_VERSION
 from driving_log.records import DriveInput, RecordService
-from driving_log.web import _format_local_datetime, _parse_local
+from driving_log.web import _format_local_datetime, _parse_local, _part_of_day
 
 
 class WebTests(unittest.TestCase):
@@ -315,15 +315,24 @@ class WebTests(unittest.TestCase):
 
                 time_grouped = await client.get("/drives?group_by=part_of_day")
                 self.assertIn(
-                    '<span class="group-label">Nighttime (solar)</span>', time_grouped.text
+                    '<span class="group-label">Nighttime (solar dusk–dawn)</span>',
+                    time_grouped.text,
                 )
-                self.assertIn("Morning (5 AM–12 PM)", time_grouped.text)
-                self.assertIn("Nighttime (solar)", time_grouped.text)
+                self.assertIn("Morning (solar dawn–12 PM)", time_grouped.text)
+                self.assertIn("Nighttime (solar dusk–dawn)", time_grouped.text)
                 self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
                 self.assertIn("Last week", time_grouped.text)
                 self.assertIn("Last year", time_grouped.text)
 
         self.run_async(scenario)
+
+    def test_time_of_day_uses_solar_dawn_and_dusk_boundaries(self) -> None:
+        self.assertEqual(
+            _part_of_day(datetime(2026, 7, 20, 21, tzinfo=UTC), DEFAULT_TIMEZONE), "evening"
+        )
+        self.assertEqual(
+            _part_of_day(datetime(2026, 7, 21, 2, tzinfo=UTC), DEFAULT_TIMEZONE), "night"
+        )
 
     def test_timestamp_formatter_uses_local_date_and_dst_offset(self) -> None:
         self.assertEqual(

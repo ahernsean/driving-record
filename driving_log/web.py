@@ -72,10 +72,10 @@ def _duration_parts(minutes: int) -> dict[str, int]:
 
 
 TIME_OF_DAY_OPTIONS = (
-    ("morning", "Morning (5 AM–12 PM)"),
+    ("morning", "Morning (solar dawn–12 PM)"),
     ("afternoon", "Afternoon (12 PM–5 PM)"),
-    ("evening", "Evening (5 PM–9 PM)"),
-    ("night", "Nighttime (solar)"),
+    ("evening", "Evening (5 PM–solar dusk)"),
+    ("night", "Nighttime (solar dusk–dawn)"),
 )
 PARTS_OF_DAY = tuple(value for value, _ in TIME_OF_DAY_OPTIONS)
 WEATHER_LABELS = (
@@ -99,25 +99,21 @@ GROUP_BY_OPTIONS = (
 
 
 def _part_of_day(value: str | datetime, timezone_name: str) -> str:
-    hour = _local_datetime_in_zone(value, timezone_name).hour
-    if 5 <= hour < 12:
-        return "morning"
-    if hour < 17:
-        return "afternoon"
-    if hour < 21:
-        return "evening"
-    return "night"
-
-
-def _time_of_day_group(row: sqlite3.Row) -> str:
-    if int(row["night_minutes"]):
+    local = _local_datetime_in_zone(value, timezone_name)
+    solar_local = local.astimezone(ZONE)
+    daylight_start, daylight_end = apex_daylight_window(solar_local.date())
+    if solar_local < daylight_start or solar_local >= daylight_end:
         return "night"
-    return _part_of_day(row["started_at_utc"], row["timezone_name"])
+    if local.hour < 12:
+        return "morning"
+    if local.hour < 17:
+        return "afternoon"
+    return "evening"
 
 
 def _time_of_day_label(value: str) -> str:
     if value == "night":
-        return "Nighttime (solar)"
+        return "Nighttime (solar dusk–dawn)"
     return value.title()
 
 
@@ -191,7 +187,7 @@ def _drive_group_key(row: sqlite3.Row, group_by: str) -> tuple[str, str]:
             return ("mixed", "Day and night")
         return ("day" if day else "night", "Day" if day else "Night")
     if group_by == "part_of_day":
-        part = _time_of_day_group(row)
+        part = _part_of_day(row["started_at_utc"], row["timezone_name"])
         return (part, _time_of_day_label(part))
     if group_by == "road_type":
         road_type = str(row["road_type"])
@@ -417,12 +413,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             if raw_filters["day_night"] == "night" and not row["night_minutes"]:
                 continue
             selected_part = raw_filters["part_of_day"]
-            if selected_part == "night" and not row["night_minutes"]:
-                continue
-            if (
-                selected_part
-                and selected_part != "night"
-                and (_part_of_day(row["started_at_utc"], row["timezone_name"]) != selected_part)
+            if selected_part and (
+                _part_of_day(row["started_at_utc"], row["timezone_name"]) != selected_part
             ):
                 continue
             if raw_filters["road_type"] and row["road_type"] != raw_filters["road_type"]:

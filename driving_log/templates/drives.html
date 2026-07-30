@@ -66,7 +66,7 @@
         <select name="group_by">{% for value, label in group_by_options %}<option value="{{ value }}" {{ "selected" if group_by == value }}>{{ label }}</option>{% endfor %}</select>
       </label>
       <div class="filter-actions"><a class="button" href="/drives">Clear</a><button class="primary" type="submit">Apply</button></div>
-      <p class="field-note">Morning, afternoon, and evening use local start time. Nighttime (solar) includes every drive with minutes outside the sunrise-minus-15 to sunset-plus-15 daylight window.</p>
+      <p class="field-note">Morning begins at solar dawn and evening ends at solar dusk (sunrise minus 15 minutes through sunset plus 15 minutes). Drives are grouped by local start time.</p>
     </form>
   </details>
 
