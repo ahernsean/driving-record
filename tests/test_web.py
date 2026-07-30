@@ -313,11 +313,19 @@ class WebTests(unittest.TestCase):
                     'type="checkbox" name="weather" value="rain" checked', weather_filtered.text
                 )
 
-                with_warning = records.list_drives()[0]
+                with_warning = next(
+                    row for row in records.list_drives() if row["road_type"] == "highway"
+                )
                 with self.app.state.database.transaction() as connection:
                     connection.execute(
                         "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
-                        (str(uuid.uuid4()), with_warning["id"], "review_needed", "Review this drive", ""),
+                        (
+                            str(uuid.uuid4()),
+                            with_warning["id"],
+                            "review_needed",
+                            "Review this drive",
+                            "",
+                        ),
                     )
                 warnings_only = await client.get("/drives?warnings_only=1")
                 self.assertIn("1 drive · 0h 45m", warnings_only.text)
