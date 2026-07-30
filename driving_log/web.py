@@ -72,10 +72,10 @@ def _duration_parts(minutes: int) -> dict[str, int]:
 
 
 TIME_OF_DAY_OPTIONS = (
-    ("morning", "Morning (solar dawn–12 PM)"),
+    ("morning", "Morning (dawn–12 PM)"),
     ("afternoon", "Afternoon (12 PM–5 PM)"),
-    ("evening", "Evening (5 PM–solar dusk)"),
-    ("night", "Nighttime (solar dusk–dawn)"),
+    ("evening", "Evening (5 PM–dusk)"),
+    ("night", "Nighttime (dusk–dawn)"),
 )
 PARTS_OF_DAY = tuple(value for value, _ in TIME_OF_DAY_OPTIONS)
 WEATHER_LABELS = (
@@ -113,7 +113,7 @@ def _part_of_day(value: str | datetime, timezone_name: str) -> str:
 
 def _time_of_day_label(value: str) -> str:
     if value == "night":
-        return "Nighttime (solar dusk–dawn)"
+        return "Nighttime (dusk–dawn)"
     return value.title()
 
 
@@ -467,7 +467,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                     "morning": 0,
                     "afternoon": 1,
                     "evening": 2,
-                    "nighttime (solar)": 3,
+                    "nighttime (dusk–dawn)": 3,
                     "under 30 minutes": 0,
                     "30–59 minutes": 1,
                     "1–2 hours": 2,
