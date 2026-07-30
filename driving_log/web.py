@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime, timedelta
+import sqlite3
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -68,6 +69,99 @@ def _duration_parts(minutes: int) -> dict[str, int]:
         "duration_hours": minutes // 60,
         "duration_remainder": minutes % 60,
     }
+
+
+PARTS_OF_DAY = ("morning", "afternoon", "evening", "night")
+GROUP_BY_OPTIONS = (
+    ("none", "No grouping"),
+    ("date", "Date"),
+    ("supervisor", "Supervising driver"),
+    ("day_night", "Day / night"),
+    ("part_of_day", "Time of day"),
+    ("road_type", "Road type"),
+    ("weather", "Weather"),
+    ("duration", "Duration"),
+)
+
+
+def _part_of_day(value: str | datetime, timezone_name: str) -> str:
+    hour = _local_datetime_in_zone(value, timezone_name).hour
+    if 5 <= hour < 12:
+        return "morning"
+    if hour < 17:
+        return "afternoon"
+    if hour < 21:
+        return "evening"
+    return "night"
+
+
+def _local_datetime_in_zone(value: str | datetime, timezone_name: str) -> datetime:
+    parsed = (
+        datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else value
+    )
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(ZoneInfo(timezone_name))
+
+
+def _duration_bucket(minutes: int) -> str:
+    if minutes < 30:
+        return "Under 30 minutes"
+    if minutes < 60:
+        return "30–59 minutes"
+    if minutes < 120:
+        return "1–2 hours"
+    return "2+ hours"
+
+
+def _parse_filter_date(value: str, field: str) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a valid date") from exc
+
+
+def _parse_filter_minutes(value: str, field: str) -> int | None:
+    if not value:
+        return None
+    try:
+        minutes = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a whole number of minutes") from exc
+    if minutes < 0:
+        raise ValueError(f"{field} cannot be negative")
+    return minutes
+
+
+def _drive_group_key(row: sqlite3.Row, group_by: str) -> tuple[str, str]:
+    # sqlite rows deliberately remain the source of truth; this is only presentation grouping.
+    if group_by == "date":
+        local = _local_datetime_in_zone(str(row["started_at_utc"]), str(row["timezone_name"]))
+        return (local.date().isoformat(), _format_local_date(str(row["started_at_utc"])))
+    if group_by == "supervisor":
+        name = str(row["supervisor_name"] or "").strip()
+        return (name.casefold() or "unspecified", name or "Unspecified")
+    if group_by == "day_night":
+        day = int(row["day_minutes"])
+        night = int(row["night_minutes"])
+        if day and night:
+            return ("mixed", "Day and night")
+        return ("day" if day else "night", "Day" if day else "Night")
+    if group_by == "part_of_day":
+        part = _part_of_day(str(row["started_at_utc"]), str(row["timezone_name"]))
+        return (part, part.title())
+    if group_by == "road_type":
+        road_type = str(row["road_type"])
+        return (road_type, road_type.title())
+    if group_by == "weather":
+        weather = str(row["weather"] or "").strip()
+        return (weather.casefold() or "unspecified", weather or "Unspecified")
+    if group_by == "duration":
+        label = _duration_bucket(int(row["duration_minutes"]))
+        return (label, label)
+    return ("all", "All drives")
 
 
 def _theme_context(now: datetime | None = None) -> dict[str, object]:
@@ -184,13 +278,158 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.get("/drives", response_class=HTMLResponse)
     async def drive_list(request: Request) -> HTMLResponse:
-        drives = records.list_drives()
+        raw_filters = {
+            name: request.query_params.get(name, "")
+            for name in (
+                "period",
+                "start_date",
+                "end_date",
+                "supervisor",
+                "day_night",
+                "part_of_day",
+                "road_type",
+                "weather",
+                "min_duration",
+                "max_duration",
+                "group_by",
+            )
+        }
+        period = raw_filters["period"] or "all"
+        if period not in {"all", "today", "week", "month", "last_month", "year", "custom"}:
+            raise ValueError("Choose a valid date range")
+        group_by = raw_filters["group_by"] or "none"
+        if group_by not in {value for value, _ in GROUP_BY_OPTIONS}:
+            raise ValueError("Choose a valid grouping")
+        if raw_filters["day_night"] not in {"", "day", "night"}:
+            raise ValueError("Choose day or night")
+        if raw_filters["part_of_day"] not in {"", *PARTS_OF_DAY}:
+            raise ValueError("Choose a valid time of day")
+
+        start_date = _parse_filter_date(raw_filters["start_date"], "Start date")
+        end_date = _parse_filter_date(raw_filters["end_date"], "End date")
+        if start_date and end_date and start_date > end_date:
+            raise ValueError("Start date must not be after end date")
+        if period != "custom":
+            today = datetime.now(ZONE).date()
+            if period == "today":
+                start_date = end_date = today
+            elif period == "week":
+                start_date, end_date = today - timedelta(days=today.weekday()), today
+            elif period == "month":
+                start_date, end_date = today.replace(day=1), today
+            elif period == "last_month":
+                end_date = today.replace(day=1) - timedelta(days=1)
+                start_date = end_date.replace(day=1)
+            elif period == "year":
+                start_date, end_date = today.replace(month=1, day=1), today
+        min_duration = _parse_filter_minutes(raw_filters["min_duration"], "Minimum duration")
+        max_duration = _parse_filter_minutes(raw_filters["max_duration"], "Maximum duration")
+        if min_duration is not None and max_duration is not None and min_duration > max_duration:
+            raise ValueError("Minimum duration must not exceed maximum duration")
+
+        drives = []
+        for row in records.list_drives():
+            local = _local_datetime_in_zone(row["started_at_utc"], row["timezone_name"])
+            if start_date and local.date() < start_date:
+                continue
+            if end_date and local.date() > end_date:
+                continue
+            if raw_filters["supervisor"] and row["supervisor_name"] != raw_filters["supervisor"]:
+                continue
+            if raw_filters["day_night"] == "day" and not row["day_minutes"]:
+                continue
+            if raw_filters["day_night"] == "night" and not row["night_minutes"]:
+                continue
+            if (
+                raw_filters["part_of_day"]
+                and _part_of_day(row["started_at_utc"], row["timezone_name"])
+                != raw_filters["part_of_day"]
+            ):
+                continue
+            if raw_filters["road_type"] and row["road_type"] != raw_filters["road_type"]:
+                continue
+            if raw_filters["weather"] and row["weather"] != raw_filters["weather"]:
+                continue
+            if min_duration is not None and row["duration_minutes"] < min_duration:
+                continue
+            if max_duration is not None and row["duration_minutes"] > max_duration:
+                continue
+            drives.append(row)
+
         warnings = records.warnings_for_many()
-        enriched = [{"row": row, "warnings": warnings.get(row["id"], [])} for row in drives]
+        enriched: list[dict[str, object]] = [
+            {"row": row, "warnings": warnings.get(row["id"], [])} for row in drives
+        ]
+        totals = {
+            "count": len(drives),
+            "minutes": sum(int(row["duration_minutes"]) for row in drives),
+            "day_minutes": sum(int(row["day_minutes"]) for row in drives),
+            "night_minutes": sum(int(row["night_minutes"]) for row in drives),
+        }
+        groups: list[dict[str, object]] = []
+        if group_by != "none":
+            grouped: dict[str, dict[str, object]] = {}
+            for item in enriched:
+                row = cast(sqlite3.Row, item["row"])
+                key, label = _drive_group_key(row, group_by)
+                group = grouped.setdefault(
+                    key,
+                    {
+                        "label": label,
+                        "drives": [],
+                        "minutes": 0,
+                        "day_minutes": 0,
+                        "night_minutes": 0,
+                    },
+                )
+                cast(list[dict[str, object]], group["drives"]).append(item)
+                group["minutes"] = cast(int, group["minutes"]) + int(row["duration_minutes"])
+                group["day_minutes"] = cast(int, group["day_minutes"]) + int(row["day_minutes"])
+                group["night_minutes"] = cast(int, group["night_minutes"]) + int(
+                    row["night_minutes"]
+                )
+            groups = list(grouped.values())
+            if group_by in {"part_of_day", "duration"}:
+                order = {
+                    "morning": 0,
+                    "afternoon": 1,
+                    "evening": 2,
+                    "night": 3,
+                    "under 30 minutes": 0,
+                    "30–59 minutes": 1,
+                    "1–2 hours": 2,
+                    "2+ hours": 3,
+                }
+                groups.sort(
+                    key=lambda group: order.get(str(group["label"]).lower(), str(group["label"]))
+                )
+            else:
+                groups.sort(key=lambda group: str(group["label"]).casefold())
         return templates.TemplateResponse(
             request,
             "drives.html",
-            common(request, title="Drive history", drives=enriched),
+            common(
+                request,
+                title="Drive history",
+                drives=enriched,
+                filters=raw_filters,
+                supervisors=sorted(
+                    {
+                        str(row["supervisor_name"])
+                        for row in records.list_drives()
+                        if row["supervisor_name"]
+                    },
+                    key=str.casefold,
+                ),
+                weather_options=sorted(
+                    {str(row["weather"]) for row in records.list_drives() if row["weather"]},
+                    key=str.casefold,
+                ),
+                totals=totals,
+                groups=groups,
+                group_by=group_by,
+                group_by_options=GROUP_BY_OPTIONS,
+            ),
         )
 
     @app.get("/drives/new", response_class=HTMLResponse)

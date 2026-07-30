@@ -20,6 +20,7 @@ from driving_log.app import create_app
 from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.db import utc_now_text
 from driving_log.migrations import LATEST_SCHEMA_VERSION
+from driving_log.records import DriveInput, RecordService
 from driving_log.web import _format_local_datetime, _parse_local
 
 
@@ -240,6 +241,68 @@ class WebTests(unittest.TestCase):
                 csv_export = await client.get("/csv/export")
                 self.assertEqual(csv_export.status_code, 200)
                 self.assertIn("text/csv", csv_export.headers["content-type"])
+
+        self.run_async(scenario)
+
+    def test_drive_history_filters_totals_and_groups(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                ) as client,
+            ):
+                records = RecordService(self.app.state.database)
+                for start, end, supervisor, road_type, weather in (
+                    (
+                        datetime(2026, 7, 20, 16, tzinfo=UTC),
+                        datetime(2026, 7, 20, 16, 45, tzinfo=UTC),
+                        "Sean Ahern",
+                        "highway",
+                        "clear",
+                    ),
+                    (
+                        datetime(2026, 7, 21, 2, tzinfo=UTC),
+                        datetime(2026, 7, 21, 2, 30, tzinfo=UTC),
+                        "Alex Smith",
+                        "local",
+                        "rain",
+                    ),
+                ):
+                    records.create(
+                        DriveInput(
+                            driver_name="Daniel Ahern",
+                            supervisor_name=supervisor,
+                            supervisor_dl_number=None,
+                            supervisor_dl_state=None,
+                            started_at_utc=start,
+                            ended_at_utc=end,
+                            road_type=road_type,
+                            weather=weather,
+                        ),
+                        request_id=str(uuid.uuid4()),
+                    )
+
+                filtered = await client.get(
+                    "/drives?road_type=highway&supervisor=Sean+Ahern&group_by=road_type"
+                )
+                self.assertEqual(filtered.status_code, 200)
+                self.assertIn("1 drive · 0h 45m", filtered.text)
+                self.assertIn("0h 45m day", filtered.text)
+                self.assertIn("Highway", filtered.text)
+                self.assertNotIn("0h 30m · local", filtered.text)
+
+                afternoon = await client.get("/drives?part_of_day=afternoon")
+                self.assertIn("1 drive · 0h 45m", afternoon.text)
+                self.assertIn("0h 45m · highway", afternoon.text)
+                self.assertNotIn("0h 30m · local", afternoon.text)
+
+                grouped = await client.get("/drives?group_by=weather")
+                self.assertIn("clear", grouped.text)
+                self.assertIn("rain", grouped.text)
+                self.assertIn("0h 45m day", grouped.text)
+                self.assertIn("0h 30m night", grouped.text)
 
         self.run_async(scenario)
 

@@ -113,6 +113,21 @@ h2 { font-size: 1.2rem; }
 .drive-row .drive-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drive-row small { color: var(--muted); }
 .drive-row em { color: #d97706; font-style: normal; font-weight: 700; }
+.history-controls, .filtered-totals, .drive-group {
+  margin-bottom: 1rem; padding: 1rem; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 1rem;
+}
+.history-controls > summary, .drive-group > summary { cursor: pointer; font-weight: 750; }
+.history-filter { display: grid; gap: .8rem; margin-top: 1rem; }
+.history-filter label { display: grid; gap: .4rem; font-weight: 650; }
+.filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+.filtered-totals { display: grid; gap: .2rem; }
+.filtered-totals span, .drive-group summary small { color: var(--muted); }
+.drive-groups { display: grid; gap: .7rem; }
+.drive-group { margin: 0; }
+.drive-group > summary { display: flex; justify-content: space-between; gap: .75rem; }
+.drive-group summary small { text-align: right; font-weight: 500; }
+.drive-group .drive-list { margin-top: .9rem; }
 .stacked-form { display: grid; gap: 1rem; }
 .stacked-form label { display: grid; gap: .4rem; font-weight: 650; }
 .muted { color: var(--muted); }
