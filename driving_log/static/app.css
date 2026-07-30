@@ -121,6 +121,9 @@ h2 { font-size: 1.2rem; }
 .history-filter { display: grid; gap: .8rem; margin-top: 1rem; }
 .history-filter label { display: grid; gap: .4rem; font-weight: 650; }
 .history-filter input, .history-filter select { min-width: 0; }
+.history-filter input[type="date"] {
+  display: block; inline-size: min(100%, calc(100vw - 4rem)); max-inline-size: 100%;
+}
 .history-filter .two-column { grid-template-columns: minmax(0, 1fr); }
 .history-filter .two-column > label, .history-filter .two-column > fieldset { min-width: 0; }
 .filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
