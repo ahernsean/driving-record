@@ -484,9 +484,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(_drive_group_key(row, "date")[0], "2026-07-20")
         self.assertEqual(_drive_group_key(row, "supervisor"), ("sean ahern", "Sean Ahern"))
         self.assertEqual(_drive_group_key(row, "day_night"), ("mixed", "Day and night"))
-        self.assertEqual(
-            _drive_group_key(row, "part_of_day"), ("night", "Nighttime (dusk–dawn)")
-        )
+        self.assertEqual(_drive_group_key(row, "part_of_day"), ("night", "Nighttime (dusk–dawn)"))
         self.assertEqual(_drive_group_key(row, "road_type"), ("highway", "Highway"))
         self.assertEqual(_drive_group_key(row, "weather"), ("clear-rain", "Clear · Rain"))
         self.assertEqual(_drive_group_key(row, "duration"), ("30–59 minutes", "30–59 minutes"))
