@@ -150,6 +150,9 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert page.locator('option[value="last_year"]').text_content() == "Last year"
                 start_date.fill("2025-08-01")
                 assert page.locator('select[name="period"]').input_value() == "custom"
+                end_date.fill("2025-08-10")
+                start_date.fill("2025-08-15")
+                assert end_date.input_value() == "2025-08-15"
                 page.goto(url)
                 page.get_by_role("button", name="Start a drive").click()
                 page.wait_for_url("**/live")

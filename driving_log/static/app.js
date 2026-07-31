@@ -162,14 +162,15 @@
       start.value = range.start;
       end.value = range.end;
     });
-    [start, end].forEach(input => {
-      input.addEventListener("input", () => {
-        period.value = "custom";
-      });
-      input.addEventListener("change", () => {
-        period.value = "custom";
-      });
-    });
+    const selectCustom = () => { period.value = "custom"; };
+    const keepEndAfterStart = () => {
+      selectCustom();
+      if (start.value && end.value && start.value > end.value) end.value = start.value;
+    };
+    start.addEventListener("input", keepEndAfterStart);
+    start.addEventListener("change", keepEndAfterStart);
+    end.addEventListener("input", selectCustom);
+    end.addEventListener("change", selectCustom);
   });
 
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
