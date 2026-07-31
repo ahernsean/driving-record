@@ -5,11 +5,13 @@ import hashlib
 import io
 import json
 import re
+import sqlite3
 import tempfile
 import unittest
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import anyio
@@ -20,7 +22,19 @@ from driving_log.app import create_app
 from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.db import utc_now_text
 from driving_log.migrations import LATEST_SCHEMA_VERSION
-from driving_log.web import _format_local_datetime, _parse_local
+from driving_log.records import DriveInput, RecordService
+from driving_log.web import (
+    _drive_group_key,
+    _duration_bucket,
+    _format_local_datetime,
+    _format_minutes,
+    _local_datetime_in_zone,
+    _parse_filter_date,
+    _parse_filter_minutes,
+    _parse_local,
+    _part_of_day,
+    _weather_categories,
+)
 
 
 class WebTests(unittest.TestCase):
@@ -242,6 +256,262 @@ class WebTests(unittest.TestCase):
                 self.assertIn("text/csv", csv_export.headers["content-type"])
 
         self.run_async(scenario)
+
+    def test_drive_history_filters_totals_and_groups(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                ) as client,
+            ):
+                records = RecordService(self.app.state.database)
+                for start, end, supervisor, road_type, weather in (
+                    (
+                        datetime(2026, 7, 20, 16, tzinfo=UTC),
+                        datetime(2026, 7, 20, 16, 45, tzinfo=UTC),
+                        "Sean Ahern",
+                        "highway",
+                        "clear",
+                    ),
+                    (
+                        datetime(2026, 7, 22, 2, tzinfo=UTC),
+                        datetime(2026, 7, 22, 2, 30, tzinfo=UTC),
+                        "Alex Smith",
+                        "local",
+                        "rain",
+                    ),
+                    (
+                        datetime(2026, 7, 21, 0, 30, tzinfo=UTC),
+                        datetime(2026, 7, 21, 1, tzinfo=UTC),
+                        "Sean Ahern",
+                        "local",
+                        "clear",
+                    ),
+                ):
+                    records.create(
+                        DriveInput(
+                            driver_name="Daniel Ahern",
+                            supervisor_name=supervisor,
+                            supervisor_dl_number=None,
+                            supervisor_dl_state=None,
+                            started_at_utc=start,
+                            ended_at_utc=end,
+                            road_type=road_type,
+                            weather=weather,
+                        ),
+                        request_id=str(uuid.uuid4()),
+                    )
+
+                filtered = await client.get(
+                    "/drives?road_type=highway&supervisor=Sean+Ahern&group_by=road_type"
+                )
+                self.assertEqual(filtered.status_code, 200)
+                self.assertIn("1 drive · 0h 45m", filtered.text)
+                self.assertIn("0h 45m day", filtered.text)
+                self.assertIn("Highway", filtered.text)
+                self.assertNotIn("0h 30m · local", filtered.text)
+
+                afternoon = await client.get("/drives?part_of_day=afternoon")
+                self.assertIn("1 drive · 0h 45m", afternoon.text)
+                self.assertIn("0h 45m · highway", afternoon.text)
+                self.assertNotIn("0h 30m · local", afternoon.text)
+
+                grouped = await client.get("/drives?group_by=weather")
+                self.assertIn("clear", grouped.text)
+                self.assertIn("rain", grouped.text)
+                self.assertIn("0h 45m day", grouped.text)
+                self.assertIn("0h 30m night", grouped.text)
+
+                weather_filtered = await client.get("/drives?weather=clear&weather=rain")
+                self.assertIn("3 drives · 1h 45m", weather_filtered.text)
+                self.assertIn(
+                    'type="checkbox" name="weather" value="clear" checked', weather_filtered.text
+                )
+                self.assertIn(
+                    'type="checkbox" name="weather" value="rain" checked', weather_filtered.text
+                )
+
+                with_warning = next(
+                    row for row in records.list_drives() if row["road_type"] == "highway"
+                )
+                with self.app.state.database.transaction() as connection:
+                    connection.execute(
+                        "INSERT INTO drive_warnings VALUES (?, ?, ?, ?, ?)",
+                        (
+                            str(uuid.uuid4()),
+                            with_warning["id"],
+                            "review_needed",
+                            "Review this drive",
+                            "",
+                        ),
+                    )
+                warnings_only = await client.get("/drives?warnings_only=1")
+                self.assertIn("1 drive · 0h 45m", warnings_only.text)
+                self.assertIn("0h 45m · highway", warnings_only.text)
+                self.assertNotIn("0h 30m · local", warnings_only.text)
+                self.assertIn(
+                    'type="checkbox" name="warnings_only" value="1" checked', warnings_only.text
+                )
+
+                time_grouped = await client.get("/drives?group_by=part_of_day")
+                self.assertIn(
+                    '<span class="group-label">Nighttime (dusk–dawn)</span>',
+                    time_grouped.text,
+                )
+                self.assertIn("Morning (dawn–12 PM)", time_grouped.text)
+                self.assertIn("Nighttime (dusk–dawn)", time_grouped.text)
+                self.assertIn("2 drives · 1h 00m", time_grouped.text)
+                self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
+                self.assertIn("Last week", time_grouped.text)
+                self.assertIn("Last year", time_grouped.text)
+
+                day_minutes = sum(
+                    int(row["day_minutes"])
+                    for row in records.list_drives()
+                    if int(row["day_minutes"])
+                )
+                daytime = await client.get("/drives?day_night=day")
+                self.assertIn(f"2 drives · {_format_minutes(day_minutes)}", daytime.text)
+                self.assertIn("counted toward Daytime", daytime.text)
+
+                night_minutes = sum(
+                    int(row["night_minutes"])
+                    for row in records.list_drives()
+                    if int(row["night_minutes"])
+                )
+                nighttime = await client.get("/drives?day_night=night")
+                self.assertIn(f"2 drives · {_format_minutes(night_minutes)}", nighttime.text)
+                self.assertIn("counted toward Nighttime", nighttime.text)
+
+                day_night_grouped = await client.get("/drives?group_by=day_night")
+                self.assertEqual(day_night_grouped.text.count("counted toward Day"), 1)
+                self.assertEqual(day_night_grouped.text.count("counted toward Night"), 1)
+
+                date_grouped = await client.get("/drives?group_by=date")
+                self.assertLess(
+                    date_grouped.text.index("Tuesday, Jul 21, 2026"),
+                    date_grouped.text.index("Monday, Jul 20, 2026"),
+                )
+
+                records.create(
+                    DriveInput(
+                        driver_name="Daniel Ahern",
+                        supervisor_name="Alex Smith",
+                        supervisor_dl_number=None,
+                        supervisor_dl_state=None,
+                        started_at_utc=datetime(2026, 7, 20, 2, tzinfo=UTC),
+                        ended_at_utc=datetime(2026, 7, 20, 2, 30, tzinfo=UTC),
+                        road_type="local",
+                        weather="clear",
+                        timezone_name=DEFAULT_TIMEZONE,
+                    ),
+                    request_id=str(uuid.uuid4()),
+                )
+                eastern_date_grouped = await client.get("/drives?group_by=date")
+                self.assertIn("Sunday, Jul 19, 2026", eastern_date_grouped.text)
+
+                all_time = await client.get(
+                    "/drives?period=all&start_date=2026-07-21&end_date=2026-07-21"
+                )
+                self.assertIn("4 drives · 2h 15m", all_time.text)
+                self.assertIn('name="start_date" value=""', all_time.text)
+                self.assertIn('name="end_date" value=""', all_time.text)
+
+                for query in (
+                    "period=today",
+                    "period=week",
+                    "period=last_week",
+                    "period=month",
+                    "period=last_month",
+                    "period=year",
+                    "period=last_year",
+                    "period=custom&start_date=2026-07-20&end_date=2026-07-21",
+                    "supervisor=none",
+                    "day_night=day",
+                    "day_night=night",
+                    "road_type=local",
+                    "weather=cloudy",
+                    "min_duration=30&max_duration=45",
+                    "group_by=supervisor",
+                    "group_by=day_night",
+                    "group_by=road_type",
+                    "group_by=duration",
+                ):
+                    self.assertEqual((await client.get(f"/drives?{query}")).status_code, 200)
+
+                for query in (
+                    "period=invalid",
+                    "group_by=invalid",
+                    "day_night=invalid",
+                    "warnings_only=true",
+                    "part_of_day=invalid",
+                    "supervisor=invalid",
+                    "weather=invalid",
+                    "period=custom&start_date=2026-07-22&end_date=2026-07-20",
+                    "min_duration=45&max_duration=30",
+                ):
+                    self.assertEqual((await client.get(f"/drives?{query}")).status_code, 400)
+
+        self.run_async(scenario)
+
+    def test_time_of_day_uses_solar_dawn_and_dusk_boundaries(self) -> None:
+        self.assertEqual(
+            _part_of_day(datetime(2026, 7, 20, 21, tzinfo=UTC), DEFAULT_TIMEZONE), "evening"
+        )
+        self.assertEqual(
+            _part_of_day(datetime(2026, 7, 21, 2, tzinfo=UTC), DEFAULT_TIMEZONE), "night"
+        )
+
+    def test_history_filter_helpers(self) -> None:
+        self.assertEqual(
+            _weather_categories("Cloudy, wet roads, and fog"), ("cloudy", "wet", "fog")
+        )
+        self.assertEqual(_weather_categories(None), ("unspecified",))
+        self.assertEqual(
+            [_duration_bucket(value) for value in (29, 30, 60, 120)],
+            [
+                "Under 30 minutes",
+                "30–59 minutes",
+                "1–2 hours",
+                "2+ hours",
+            ],
+        )
+        self.assertIsNone(_parse_filter_date("", "Date"))
+        self.assertEqual(_parse_filter_date("2026-07-20", "Date").isoformat(), "2026-07-20")
+        with self.assertRaisesRegex(ValueError, "Date must be a valid date"):
+            _parse_filter_date("not-a-date", "Date")
+        self.assertIsNone(_parse_filter_minutes("", "Minutes"))
+        self.assertEqual(_parse_filter_minutes("30", "Minutes"), 30)
+        for value, message in (("not-a-number", "whole number"), ("-1", "cannot be negative")):
+            with self.assertRaisesRegex(ValueError, message):
+                _parse_filter_minutes(value, "Minutes")
+        self.assertEqual(
+            _local_datetime_in_zone(datetime(2026, 7, 20, 16), DEFAULT_TIMEZONE).tzinfo,
+            ZoneInfo(DEFAULT_TIMEZONE),
+        )
+        row = cast(
+            sqlite3.Row,
+            {
+                "started_at_utc": "2026-07-20T16:00:00Z",
+                "timezone_name": DEFAULT_TIMEZONE,
+                "supervisor_name": " Sean Ahern ",
+                "day_minutes": 30,
+                "night_minutes": 15,
+                "road_type": "highway",
+                "weather": "clear rain",
+                "duration_minutes": 45,
+            },
+        )
+        self.assertEqual(_drive_group_key(row, "date")[0], "2026-07-20")
+        self.assertEqual(_drive_group_key(row, "supervisor"), ("sean ahern", "Sean Ahern"))
+        self.assertEqual(_drive_group_key(row, "day_night"), ("mixed", "Day and night"))
+        self.assertEqual(_drive_group_key(row, "part_of_day"), ("night", "Nighttime (dusk–dawn)"))
+        self.assertEqual(_drive_group_key(row, "road_type"), ("highway", "Highway"))
+        self.assertEqual(_drive_group_key(row, "weather"), ("clear-rain", "Clear · Rain"))
+        self.assertEqual(_drive_group_key(row, "duration"), ("30–59 minutes", "30–59 minutes"))
+        self.assertEqual(_drive_group_key(row, "unknown"), ("all", "All drives"))
 
     def test_timestamp_formatter_uses_local_date_and_dst_offset(self) -> None:
         self.assertEqual(

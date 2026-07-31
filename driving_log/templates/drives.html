@@ -1,27 +1,94 @@
 {% extends "base.html" %}
+{% macro drive_row(item) %}
+  <a class="drive-row" href="/drives/{{ item.row.id }}">
+    <strong>{{ format_local_datetime(item.row.started_at_utc) }}</strong>
+    <span class="drive-summary">{{ format_minutes(item.row.duration_minutes) }} · {{ item.row.road_type }}{% if item.row.end_location %} · {{ item.row.end_location }}{% endif %}</span>
+    <small>
+      {% if item.row.day_minutes and item.row.night_minutes %}
+        {{ format_minutes(item.row.day_minutes) }} day · {{ format_minutes(item.row.night_minutes) }} night
+      {% elif item.row.day_minutes %}
+        {{ format_minutes(item.row.day_minutes) }} day
+      {% else %}
+        {{ format_minutes(item.row.night_minutes) }} night
+      {% endif %}
+    </small>
+    {% if item.contribution_label %}<small class="drive-contribution">{{ format_minutes(item.counted_minutes) }} counted toward {{ item.contribution_label }} · {{ format_minutes(item.row.duration_minutes) }} total</small>{% endif %}
+    {% if item.warnings %}<em>{{ item.warnings | length }} warning{{ "s" if item.warnings|length != 1 }}</em>{% endif %}
+  </a>
+{% endmacro %}
 {% block content %}
   <div class="page-heading">
     <h1>Drive history</h1>
     <a class="button compact" href="/drives/new">Add drive</a>
   </div>
-  <div class="drive-list">
-    {% for item in drives %}
-      <a class="drive-row" href="/drives/{{ item.row.id }}">
-        <strong>{{ format_local_datetime(item.row.started_at_utc) }}</strong>
-        <span class="drive-summary">{{ format_minutes(item.row.duration_minutes) }} · {{ item.row.road_type }}{% if item.row.end_location %} · {{ item.row.end_location }}{% endif %}</span>
-        <small>
-          {% if item.row.day_minutes and item.row.night_minutes %}
-            {{ format_minutes(item.row.day_minutes) }} day · {{ format_minutes(item.row.night_minutes) }} night
-          {% elif item.row.day_minutes %}
-            {{ format_minutes(item.row.day_minutes) }} day
-          {% else %}
-            {{ format_minutes(item.row.night_minutes) }} night
-          {% endif %}
-        </small>
-        {% if item.warnings %}<em>{{ item.warnings | length }} warning{{ "s" if item.warnings|length != 1 }}</em>{% endif %}
-      </a>
-    {% else %}
-      <p class="empty">No completed drives yet.</p>
-    {% endfor %}
-  </div>
+
+  <details class="history-controls">
+    <summary>Filter and group drives</summary>
+    <form class="history-filter" method="get" action="/drives" data-history-filters data-date-ranges='{{ date_ranges | tojson }}'>
+      <label>Date range
+        <select name="period">
+          <option value="all" {{ "selected" if filters.period in ("", "all") }}>All time</option>
+          <option value="today" {{ "selected" if filters.period == "today" }}>Today</option>
+          <option value="week" {{ "selected" if filters.period == "week" }}>This week</option>
+          <option value="last_week" {{ "selected" if filters.period == "last_week" }}>Last week</option>
+          <option value="month" {{ "selected" if filters.period == "month" }}>This month</option>
+          <option value="last_month" {{ "selected" if filters.period == "last_month" }}>Last month</option>
+          <option value="year" {{ "selected" if filters.period == "year" }}>This year</option>
+          <option value="last_year" {{ "selected" if filters.period == "last_year" }}>Last year</option>
+          <option value="custom" {{ "selected" if filters.period == "custom" }}>Custom dates</option>
+        </select>
+      </label>
+      <div class="two-column date-filter-range">
+        <label>Start date<input type="date" name="start_date" value="{{ filters.start_date }}"></label>
+        <label>End date<input type="date" name="end_date" value="{{ filters.end_date }}"></label>
+      </div>
+      <label>Supervising driver
+        <select name="supervisor"><option value="">Any supervising driver</option><option value="none" {{ "selected" if filters.supervisor == "none" }}>None specified</option>{% for name in supervisors %}<option value="{{ name }}" {{ "selected" if filters.supervisor == name }}>{{ name }}</option>{% endfor %}</select>
+      </label>
+      <div class="two-column">
+        <label>Sunlight
+          <select name="day_night"><option value="">Day and night</option><option value="day" {{ "selected" if filters.day_night == "day" }}>Day</option><option value="night" {{ "selected" if filters.day_night == "night" }}>Night</option></select>
+        </label>
+        <label>Time of day
+          <select name="part_of_day"><option value="">Any time</option>{% for value, label in time_of_day_options %}<option value="{{ value }}" {{ "selected" if filters.part_of_day == value }}>{{ label }}</option>{% endfor %}</select>
+        </label>
+      </div>
+      <div class="two-column">
+        <label>Road type
+          <select name="road_type"><option value="">Any road type</option>{% for kind in ("local", "highway", "mixed", "unknown") %}<option value="{{ kind }}" {{ "selected" if filters.road_type == kind }}>{{ kind | title }}</option>{% endfor %}</select>
+        </label>
+        <label class="choice"><input type="checkbox" name="warnings_only" value="1" {{ "checked" if filters.warnings_only }}> Warnings only</label>
+      </div>
+      <fieldset class="weather-filter"><legend>Weather</legend>{% for value, label in weather_options %}<label class="choice"><input type="checkbox" name="weather" value="{{ value }}" {{ "checked" if value in weather_filters }}> {{ label }}</label>{% endfor %}</fieldset>
+      <div class="two-column">
+        <label>Minimum minutes<input type="number" min="0" inputmode="numeric" name="min_duration" value="{{ filters.min_duration }}"></label>
+        <label>Maximum minutes<input type="number" min="0" inputmode="numeric" name="max_duration" value="{{ filters.max_duration }}"></label>
+      </div>
+      <label>Group filtered drives by
+        <select name="group_by">{% for value, label in group_by_options %}<option value="{{ value }}" {{ "selected" if group_by == value }}>{{ label }}</option>{% endfor %}</select>
+      </label>
+      <div class="filter-actions"><button type="button" data-clear-history-filters>Clear</button><button class="primary" type="submit">Apply</button></div>
+      <p class="field-note">Morning begins at dawn and evening ends at dusk (sunrise minus 15 minutes through sunset plus 15 minutes). Time-of-day filters use local start time; Nighttime groups every drive with nighttime minutes.</p>
+    </form>
+  </details>
+
+  <section class="filtered-totals" aria-label="Filtered drive totals">
+    <strong>{{ totals.count }} drive{{ "" if totals.count == 1 else "s" }} · {{ format_minutes(totals.minutes) }}</strong>
+    <span>{% if totals.day_minutes and totals.night_minutes %}{{ format_minutes(totals.day_minutes) }} day · {{ format_minutes(totals.night_minutes) }} night{% elif totals.day_minutes %}{{ format_minutes(totals.day_minutes) }} day{% elif totals.night_minutes %}{{ format_minutes(totals.night_minutes) }} night{% else %}No recorded time{% endif %}</span>
+  </section>
+
+  {% if groups %}
+    <div class="drive-groups">
+      {% for group in groups %}
+        <details class="drive-group" {{ "open" if loop.first }}>
+          <summary><span class="group-label">{{ group.label }}</span><small>{{ group.drives | length }} drive{{ "" if group.drives|length == 1 else "s" }} · {{ format_minutes(group.minutes) }}<br>{% if group.day_minutes and group.night_minutes %}{{ format_minutes(group.day_minutes) }} day · {{ format_minutes(group.night_minutes) }} night{% elif group.day_minutes %}{{ format_minutes(group.day_minutes) }} day{% else %}{{ format_minutes(group.night_minutes) }} night{% endif %}</small></summary>
+          <div class="drive-list">{% for item in group.drives %}{{ drive_row(item) }}{% endfor %}</div>
+        </details>
+      {% endfor %}
+    </div>
+  {% elif drives %}
+    <div class="drive-list">{% for item in drives %}{{ drive_row(item) }}{% endfor %}</div>
+  {% else %}
+    <p class="empty">No completed drives match these filters.</p>
+  {% endif %}
 {% endblock %}

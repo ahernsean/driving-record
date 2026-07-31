@@ -151,6 +151,35 @@
     updateDuration();
   });
 
+  document.querySelectorAll("form[data-history-filters]").forEach(form => {
+    const period = form.querySelector('select[name="period"]');
+    const start = form.querySelector('input[name="start_date"]');
+    const end = form.querySelector('input[name="end_date"]');
+    const ranges = JSON.parse(form.dataset.dateRanges || "{}");
+    period.addEventListener("change", () => {
+      const range = ranges[period.value];
+      if (!range) return;
+      start.value = range.start;
+      end.value = range.end;
+    });
+    const selectCustom = () => { period.value = "custom"; };
+    const keepEndAfterStart = () => {
+      selectCustom();
+      if (start.value && end.value && start.value > end.value) end.value = start.value;
+    };
+    start.addEventListener("input", keepEndAfterStart);
+    start.addEventListener("change", keepEndAfterStart);
+    end.addEventListener("input", selectCustom);
+    end.addEventListener("change", selectCustom);
+    form.querySelector("[data-clear-history-filters]").addEventListener("click", () => {
+      form.querySelectorAll("input").forEach(input => {
+        if (input.type === "checkbox" || input.type === "radio") input.checked = false;
+        else input.value = "";
+      });
+      form.querySelectorAll("select").forEach(select => { select.selectedIndex = 0; });
+    });
+  });
+
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;

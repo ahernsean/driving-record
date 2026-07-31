@@ -127,6 +127,38 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     "els => Math.min(...els.map(el => el.getBoundingClientRect().height))"
                 )
                 assert smallest_button >= 44
+                page.get_by_role("link", name="History").click()
+                filters = page.locator(".history-controls")
+                assert filters.get_attribute("open") is None
+                filters.locator("summary").click()
+                start_date = page.locator('input[name="start_date"]')
+                end_date = page.locator('input[name="end_date"]')
+                start_box = start_date.bounding_box()
+                end_box = end_date.bounding_box()
+                panel_box = filters.bounding_box()
+                assert start_box and end_box and panel_box
+                assert abs(start_box["width"] - end_box["width"]) <= 1
+                assert end_box["x"] + end_box["width"] <= panel_box["x"] + panel_box["width"]
+                assert (
+                    page.evaluate(
+                        "document.documentElement.scrollWidth - "
+                        "document.documentElement.clientWidth"
+                    )
+                    <= 0
+                )
+                assert page.locator('option[value="last_week"]').text_content() == "Last week"
+                assert page.locator('option[value="last_year"]').text_content() == "Last year"
+                start_date.fill("2025-08-01")
+                assert page.locator('select[name="period"]').input_value() == "custom"
+                end_date.fill("2025-08-10")
+                start_date.fill("2025-08-15")
+                assert end_date.input_value() == "2025-08-15"
+                filters.get_by_role("button", name="Clear").click()
+                assert filters.get_attribute("open") is not None
+                assert start_date.input_value() == ""
+                assert end_date.input_value() == ""
+                assert page.locator('select[name="period"]').input_value() == "all"
+                page.goto(url)
                 page.get_by_role("button", name="Start a drive").click()
                 page.wait_for_url("**/live")
                 first_duration = page.locator("[data-duration]").text_content()
@@ -165,7 +197,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert start_input.input_value()
                 original_end = end_input.input_value()
                 assert original_end
-                duration_minutes.fill("1")
+                duration_minutes.fill("2")
                 assert end_input.input_value() != original_end
                 assert recovered.locator("[data-time-editor]").is_visible()
                 assert recovered.get_by_text("Repeated-time options").count() == 0
