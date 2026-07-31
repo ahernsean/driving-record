@@ -171,6 +171,13 @@
     start.addEventListener("change", keepEndAfterStart);
     end.addEventListener("input", selectCustom);
     end.addEventListener("change", selectCustom);
+    form.querySelector("[data-clear-history-filters]").addEventListener("click", () => {
+      form.querySelectorAll("input").forEach(input => {
+        if (input.type === "checkbox" || input.type === "radio") input.checked = false;
+        else input.value = "";
+      });
+      form.querySelectorAll("select").forEach(select => { select.selectedIndex = 0; });
+    });
   });
 
   document.querySelectorAll("form[data-async-submit]").forEach(form => {

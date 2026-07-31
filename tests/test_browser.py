@@ -153,6 +153,11 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 end_date.fill("2025-08-10")
                 start_date.fill("2025-08-15")
                 assert end_date.input_value() == "2025-08-15"
+                filters.get_by_role("button", name="Clear").click()
+                assert filters.get_attribute("open") is not None
+                assert start_date.input_value() == ""
+                assert end_date.input_value() == ""
+                assert page.locator('select[name="period"]').input_value() == "all"
                 page.goto(url)
                 page.get_by_role("button", name="Start a drive").click()
                 page.wait_for_url("**/live")
