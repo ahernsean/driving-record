@@ -112,6 +112,7 @@ h2 { font-size: 1.2rem; }
 .drive-row { display: grid; gap: .25rem; color: var(--text); text-decoration: none; }
 .drive-row .drive-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drive-row small { color: var(--muted); }
+.drive-row .drive-contribution { color: var(--accent); font-weight: 700; }
 .drive-row em { color: #d97706; font-style: normal; font-weight: 700; }
 .history-controls, .filtered-totals, .drive-group {
   margin-bottom: 1rem; padding: 1rem; background: var(--panel);

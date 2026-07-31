@@ -27,6 +27,7 @@ from driving_log.web import (
     _drive_group_key,
     _duration_bucket,
     _format_local_datetime,
+    _format_minutes,
     _local_datetime_in_zone,
     _parse_filter_date,
     _parse_filter_minutes,
@@ -365,6 +366,28 @@ class WebTests(unittest.TestCase):
                 self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
                 self.assertIn("Last week", time_grouped.text)
                 self.assertIn("Last year", time_grouped.text)
+
+                day_minutes = sum(
+                    int(row["day_minutes"])
+                    for row in records.list_drives()
+                    if int(row["day_minutes"])
+                )
+                daytime = await client.get("/drives?day_night=day")
+                self.assertIn(f"2 drives · {_format_minutes(day_minutes)}", daytime.text)
+                self.assertIn("counted toward Daytime", daytime.text)
+
+                night_minutes = sum(
+                    int(row["night_minutes"])
+                    for row in records.list_drives()
+                    if int(row["night_minutes"])
+                )
+                nighttime = await client.get("/drives?day_night=night")
+                self.assertIn(f"2 drives · {_format_minutes(night_minutes)}", nighttime.text)
+                self.assertIn("counted toward Nighttime", nighttime.text)
+
+                day_night_grouped = await client.get("/drives?group_by=day_night")
+                self.assertEqual(day_night_grouped.text.count("counted toward Day"), 1)
+                self.assertEqual(day_night_grouped.text.count("counted toward Night"), 1)
 
                 date_grouped = await client.get("/drives?group_by=date")
                 self.assertLess(

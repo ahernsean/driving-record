@@ -455,21 +455,63 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 continue
             drives.append(row)
 
+        def display_item(
+            row: sqlite3.Row,
+            contribution: str | None = None,
+            contribution_label: str | None = None,
+        ) -> dict[str, object]:
+            day_minutes = int(row["day_minutes"])
+            night_minutes = int(row["night_minutes"])
+            if contribution == "day":
+                counted_day, counted_night = day_minutes, 0
+            elif contribution == "night":
+                counted_day, counted_night = 0, night_minutes
+            else:
+                counted_day, counted_night = day_minutes, night_minutes
+            return {
+                "row": row,
+                "warnings": warnings.get(row["id"], []),
+                "counted_minutes": counted_day + counted_night,
+                "counted_day_minutes": counted_day,
+                "counted_night_minutes": counted_night,
+                "contribution_label": (
+                    contribution_label if contribution and day_minutes and night_minutes else None
+                ),
+            }
+
+        selected_sunlight = raw_filters["day_night"] or None
         enriched: list[dict[str, object]] = [
-            {"row": row, "warnings": warnings.get(row["id"], [])} for row in drives
+            display_item(
+                row,
+                selected_sunlight,
+                "Daytime" if selected_sunlight == "day" else "Nighttime",
+            )
+            for row in drives
         ]
         totals = {
             "count": len(drives),
-            "minutes": sum(int(row["duration_minutes"]) for row in drives),
-            "day_minutes": sum(int(row["day_minutes"]) for row in drives),
-            "night_minutes": sum(int(row["night_minutes"]) for row in drives),
+            "minutes": sum(cast(int, item["counted_minutes"]) for item in enriched),
+            "day_minutes": sum(cast(int, item["counted_day_minutes"]) for item in enriched),
+            "night_minutes": sum(cast(int, item["counted_night_minutes"]) for item in enriched),
         }
         groups: list[dict[str, object]] = []
         if group_by != "none":
             grouped: dict[str, dict[str, object]] = {}
-            for item in enriched:
+            grouped_items = enriched
+            if group_by == "day_night":
+                grouped_items = []
+                for row in drives:
+                    if int(row["day_minutes"]) and selected_sunlight != "night":
+                        grouped_items.append(display_item(row, "day", "Day"))
+                    if int(row["night_minutes"]) and selected_sunlight != "day":
+                        grouped_items.append(display_item(row, "night", "Night"))
+            for item in grouped_items:
                 row = cast(sqlite3.Row, item["row"])
-                key, label = _drive_group_key(row, group_by)
+                if group_by == "day_night":
+                    key = "day" if cast(int, item["counted_day_minutes"]) else "night"
+                    label = key.title()
+                else:
+                    key, label = _drive_group_key(row, group_by)
                 group = grouped.setdefault(
                     key,
                     {
@@ -482,10 +524,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                     },
                 )
                 cast(list[dict[str, object]], group["drives"]).append(item)
-                group["minutes"] = cast(int, group["minutes"]) + int(row["duration_minutes"])
-                group["day_minutes"] = cast(int, group["day_minutes"]) + int(row["day_minutes"])
-                group["night_minutes"] = cast(int, group["night_minutes"]) + int(
-                    row["night_minutes"]
+                group["minutes"] = cast(int, group["minutes"]) + cast(int, item["counted_minutes"])
+                group["day_minutes"] = cast(int, group["day_minutes"]) + cast(
+                    int, item["counted_day_minutes"]
+                )
+                group["night_minutes"] = cast(int, group["night_minutes"]) + cast(
+                    int, item["counted_night_minutes"]
                 )
             groups = list(grouped.values())
             if group_by == "date":

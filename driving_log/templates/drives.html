@@ -12,6 +12,7 @@
         {{ format_minutes(item.row.night_minutes) }} night
       {% endif %}
     </small>
+    {% if item.contribution_label %}<small class="drive-contribution">{{ format_minutes(item.counted_minutes) }} counted toward {{ item.contribution_label }} · {{ format_minutes(item.row.duration_minutes) }} total</small>{% endif %}
     {% if item.warnings %}<em>{{ item.warnings | length }} warning{{ "s" if item.warnings|length != 1 }}</em>{% endif %}
   </a>
 {% endmacro %}
