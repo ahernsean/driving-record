@@ -162,6 +162,14 @@
       start.value = range.start;
       end.value = range.end;
     });
+    [start, end].forEach(input => {
+      input.addEventListener("input", () => {
+        period.value = "custom";
+      });
+      input.addEventListener("change", () => {
+        period.value = "custom";
+      });
+    });
   });
 
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
