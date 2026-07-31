@@ -281,6 +281,13 @@ class WebTests(unittest.TestCase):
                         "local",
                         "rain",
                     ),
+                    (
+                        datetime(2026, 7, 21, 0, 30, tzinfo=UTC),
+                        datetime(2026, 7, 21, 1, tzinfo=UTC),
+                        "Sean Ahern",
+                        "local",
+                        "clear",
+                    ),
                 ):
                     records.create(
                         DriveInput(
@@ -317,7 +324,7 @@ class WebTests(unittest.TestCase):
                 self.assertIn("0h 30m night", grouped.text)
 
                 weather_filtered = await client.get("/drives?weather=clear&weather=rain")
-                self.assertIn("2 drives · 1h 15m", weather_filtered.text)
+                self.assertIn("3 drives · 1h 45m", weather_filtered.text)
                 self.assertIn(
                     'type="checkbox" name="weather" value="clear" checked', weather_filtered.text
                 )
@@ -354,6 +361,7 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertIn("Morning (dawn–12 PM)", time_grouped.text)
                 self.assertIn("Nighttime (dusk–dawn)", time_grouped.text)
+                self.assertIn("2 drives · 1h 00m", time_grouped.text)
                 self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
                 self.assertIn("Last week", time_grouped.text)
                 self.assertIn("Last year", time_grouped.text)
@@ -384,7 +392,7 @@ class WebTests(unittest.TestCase):
                 all_time = await client.get(
                     "/drives?period=all&start_date=2026-07-21&end_date=2026-07-21"
                 )
-                self.assertIn("3 drives · 1h 45m", all_time.text)
+                self.assertIn("4 drives · 2h 15m", all_time.text)
                 self.assertIn('name="start_date" value=""', all_time.text)
                 self.assertIn('name="end_date" value=""', all_time.text)
 
@@ -476,7 +484,9 @@ class WebTests(unittest.TestCase):
         self.assertEqual(_drive_group_key(row, "date")[0], "2026-07-20")
         self.assertEqual(_drive_group_key(row, "supervisor"), ("sean ahern", "Sean Ahern"))
         self.assertEqual(_drive_group_key(row, "day_night"), ("mixed", "Day and night"))
-        self.assertEqual(_drive_group_key(row, "part_of_day"), ("afternoon", "Afternoon"))
+        self.assertEqual(
+            _drive_group_key(row, "part_of_day"), ("night", "Nighttime (dusk–dawn)")
+        )
         self.assertEqual(_drive_group_key(row, "road_type"), ("highway", "Highway"))
         self.assertEqual(_drive_group_key(row, "weather"), ("clear-rain", "Clear · Rain"))
         self.assertEqual(_drive_group_key(row, "duration"), ("30–59 minutes", "30–59 minutes"))

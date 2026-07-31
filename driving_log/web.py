@@ -116,6 +116,12 @@ def _part_of_day(value: str | datetime, timezone_name: str) -> str:
     return "evening"
 
 
+def _time_of_day_group(row: sqlite3.Row) -> str:
+    if int(row["night_minutes"]):
+        return "night"
+    return _part_of_day(row["started_at_utc"], row["timezone_name"])
+
+
 def _time_of_day_label(value: str) -> str:
     if value == "night":
         return "Nighttime (dusk–dawn)"
@@ -195,7 +201,7 @@ def _drive_group_key(row: sqlite3.Row, group_by: str) -> tuple[str, str]:
             return ("mixed", "Day and night")
         return ("day" if day else "night", "Day" if day else "Night")
     if group_by == "part_of_day":
-        part = _part_of_day(row["started_at_utc"], row["timezone_name"])
+        part = _time_of_day_group(row)
         return (part, _time_of_day_label(part))
     if group_by == "road_type":
         road_type = str(row["road_type"])
