@@ -30,7 +30,14 @@
           <label class="choice"><input type="radio" name="road_type" value="{{ kind }}" {{ "checked" if kind == "unknown" }}> {{ kind | title }}</label>
         {% endfor %}
       </fieldset>
-      <label>Weather<input name="weather"></label>
+      <div data-weather-picker>
+        <fieldset><legend>Weather</legend>
+          {% for kind in ("rainy", "cloudy", "sunny", "snowy", "windy", "icy") %}
+            <label class="choice"><input type="checkbox" data-weather-option value="{{ kind }}"> {{ kind | title }}</label>
+          {% endfor %}
+        </fieldset>
+        <label>Weather notes<input name="weather" data-weather-text placeholder="For example, rainy, cloudy, foggy"></label>
+      </div>
       <label>End location<input name="end_location" placeholder="For example, Apex Friendship High School"></label>
       <label>Notes<textarea name="notes" rows="3"></textarea></label>
       <label>Supervisor<input name="supervisor_name" value="{{ live.supervisor_name or 'Sean Ahern' }}"></label>

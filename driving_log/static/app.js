@@ -151,6 +151,20 @@
     updateDuration();
   });
 
+  document.querySelectorAll("[data-weather-picker]").forEach(picker => {
+    const text = picker.querySelector("[data-weather-text]");
+    const options = Array.from(picker.querySelectorAll("[data-weather-option]"));
+    const labels = options.map(option => option.value.toLowerCase());
+    options.forEach(option => {
+      option.addEventListener("change", () => {
+        const tokens = text.value.split(",").map(token => token.trim()).filter(Boolean);
+        const extra = tokens.filter(token => !labels.includes(token.toLowerCase()));
+        const checked = options.filter(opt => opt.checked).map(opt => opt.value);
+        text.value = checked.concat(extra).join(", ");
+      });
+    });
+  });
+
   document.querySelectorAll("form[data-history-filters]").forEach(form => {
     const period = form.querySelector('select[name="period"]');
     const start = form.querySelector('input[name="start_date"]');
