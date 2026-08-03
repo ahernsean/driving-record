@@ -700,9 +700,8 @@ class WebTests(unittest.TestCase):
                     )
                     self.assertEqual(replay.status_code, 303)
                     self.assertEqual(replay.headers["location"], finalized.headers["location"])
-                    detail = await newest.get(finalized.headers["location"])
-                    self.assertIn("Home", detail.text)
-                    dashboard = await newest.get("/")
+                    self.assertEqual(finalized.headers["location"], "/")
+                    dashboard = await newest.get(finalized.headers["location"])
                     self.assertIn("Recorded drives", dashboard.text)
 
         self.run_async(scenario)

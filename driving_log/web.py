@@ -823,7 +823,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             if end_text == _local_input_value(current["provisional_ended_at_utc"])
             else _parse_local(end_text, str(form.get("end_fold", "")))
         )
-        drive = live.finalize(
+        live.finalize(
             live_id,
             request_id=str(form["request_id"]),
             road_type=str(form.get("road_type", "unknown")),
@@ -835,7 +835,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),
         )
-        return redirect(f"/drives/{drive['id']}")
+        return redirect("/")
 
     @app.get("/imports", response_class=HTMLResponse)
     async def imports_page(request: Request) -> HTMLResponse:
