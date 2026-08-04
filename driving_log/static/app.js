@@ -120,10 +120,16 @@
     const updateDuration = () => {
       const start = localInputMilliseconds(startInput.value);
       const end = localInputMilliseconds(endInput.value);
-      const totalMinutes = Math.round((end - start) / 60000);
-      const valid = Number.isFinite(totalMinutes) && totalMinutes > 0;
+      const diffMs = end - start;
+      // The datetime-local inputs only carry minute precision, so a drive
+      // shorter than a minute renders identical start/end values here even
+      // though the server holds the true, more precise timestamps. Only
+      // block on an end that's visibly before the start; let the server's
+      // full-precision minimum-duration check be the real authority.
+      const valid = Number.isFinite(diffMs) && diffMs >= 0;
       endInput.setCustomValidity(valid ? "" : "End time must be after start time.");
       if (!valid) return;
+      const totalMinutes = Math.round(diffMs / 60000);
       hoursInput.value = String(Math.floor(totalMinutes / 60));
       minutesInput.value = String(totalMinutes % 60);
       hoursInput.setCustomValidity("");
