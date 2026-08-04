@@ -210,10 +210,22 @@ class WebTests(unittest.TestCase):
                 self.assertIn('aria-label="Duration hours"', manual_form.text)
                 self.assertNotIn("data-precise-start=", manual_form.text)
                 self.assertNotIn("data-minimum-duration-seconds", manual_form.text)
+                self.assertNotIn("data-cancel-form", manual_form.text)
+                self.assertNotIn("Delete drive", manual_form.text)
                 edit_form = await client.get(f"{response.headers['location']}/edit")
                 self.assertIn("data-time-editor", edit_form.text)
                 self.assertIn('value="2026-07-20T12:00"', edit_form.text)
                 self.assertIn('value="2026-07-20T12:30"', edit_form.text)
+                cancel_href = response.headers["location"]
+                self.assertIn(
+                    f'href="{cancel_href}" data-cancel-form="drive-form">Cancel</a>',
+                    edit_form.text,
+                )
+                self.assertIn(
+                    "confirm('Delete this drive? It remains in audit history.')",
+                    edit_form.text,
+                )
+                self.assertIn(">Delete drive</button>", edit_form.text)
                 version_match = re.search(r'name="version" value="(\d+)"', edit_form.text)
                 self.assertIsNotNone(version_match)
                 updated = await client.post(

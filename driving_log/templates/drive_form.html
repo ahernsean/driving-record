@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
   <h1>{{ title }}</h1>
-  <form class="stacked-form" method="post" action="{{ action }}" data-async-submit>
+  <form id="drive-form" class="stacked-form" method="post" action="{{ action }}" data-async-submit>
     <input type="hidden" name="request_id" value="{{ '10000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     {% if drive %}<input type="hidden" name="version" value="{{ drive.version }}">{% endif %}
     {% include "_time_editor.html" %}
@@ -27,4 +27,14 @@
     </label>
     <button class="primary" type="submit">Save drive</button>
   </form>
+  {% if drive %}
+    <div class="actions">
+      <a class="button" href="/drives/{{ drive.id }}" data-cancel-form="drive-form">Cancel</a>
+      <form method="post" action="/drives/{{ drive.id }}/delete" data-async-submit onsubmit="return confirm('Delete this drive? It remains in audit history.')">
+        <input type="hidden" name="request_id" value="{{ '90000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+        <input type="hidden" name="version" value="{{ drive.version }}">
+        <button class="danger" type="submit">Delete drive</button>
+      </form>
+    </div>
+  {% endif %}
 {% endblock %}

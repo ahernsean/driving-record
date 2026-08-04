@@ -266,6 +266,18 @@
     });
   });
 
+  document.querySelectorAll("[data-cancel-form]").forEach(link => {
+    const form = document.getElementById(link.dataset.cancelForm);
+    if (!form) return;
+    const serialize = () => new URLSearchParams(new FormData(form)).toString();
+    const initialState = serialize();
+    link.addEventListener("click", event => {
+      if (serialize() !== initialState && !confirm("Discard your changes to this drive?")) {
+        event.preventDefault();
+      }
+    });
+  });
+
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;
