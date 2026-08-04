@@ -30,7 +30,8 @@
           <label class="choice"><input type="radio" name="road_type" value="{{ kind }}" {{ "checked" if kind == "unknown" }}> {{ kind | title }}</label>
         {% endfor %}
       </fieldset>
-      <label>Weather<input name="weather"></label>
+      {% set weather_value = "" %}
+      {% include "_weather_picker.html" %}
       <label>End location<input name="end_location" placeholder="For example, Apex Friendship High School"></label>
       <label>Notes<textarea name="notes" rows="3"></textarea></label>
       <label>Supervisor<input name="supervisor_name" value="{{ live.supervisor_name or 'Sean Ahern' }}"></label>

@@ -1,0 +1,6 @@
+<fieldset data-weather-picker><legend>Weather</legend>
+  {% for kind in ("clear", "cloudy", "rainy", "foggy") %}
+    <label class="choice"><input type="checkbox" data-weather-option value="{{ kind }}"> {{ kind | title }}</label>
+  {% endfor %}
+  <label class="weather-notes">Weather notes<input name="weather" data-weather-text value="{{ weather_value }}" placeholder="For example, clear, cloudy, windy"></label>
+</fieldset>

@@ -151,6 +151,34 @@
     updateDuration();
   });
 
+  document.querySelectorAll("[data-weather-picker]").forEach(picker => {
+    const text = picker.querySelector("[data-weather-text]");
+    const options = Array.from(picker.querySelectorAll("[data-weather-option]"));
+
+    const tokensOf = () => text.value.split(",").map(token => token.trim()).filter(Boolean);
+    const matches = (token, label) => label.toLowerCase().startsWith(token.toLowerCase());
+
+    const syncTextFromCheckboxes = () => {
+      const tokens = tokensOf();
+      const extra = tokens.filter(token => !options.some(option => matches(token, option.value)));
+      const parts = options
+        .filter(option => option.checked)
+        .map(option => tokens.find(token => matches(token, option.value)) || option.value);
+      text.value = parts.concat(extra).join(", ");
+    };
+
+    const syncCheckboxesFromText = () => {
+      const tokens = tokensOf();
+      options.forEach(option => {
+        option.checked = tokens.some(token => matches(token, option.value));
+      });
+    };
+
+    options.forEach(option => option.addEventListener("change", syncTextFromCheckboxes));
+    text.addEventListener("input", syncCheckboxesFromText);
+    syncCheckboxesFromText();
+  });
+
   document.querySelectorAll("form[data-history-filters]").forEach(form => {
     const period = form.querySelector('select[name="period"]');
     const start = form.querySelector('input[name="start_date"]');
