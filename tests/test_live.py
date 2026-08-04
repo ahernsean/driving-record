@@ -139,6 +139,29 @@ class LiveDriveTests(unittest.TestCase):
         self.assertEqual(drive["ended_at_utc"], "2026-07-26T12:35:00Z")
         self.assertEqual(drive["duration_minutes"], 40)
 
+    def test_finalize_with_only_end_corrected_uses_minute_consistent_duration(self) -> None:
+        self.clock.value = datetime(2026, 7, 26, 12, 0, 50, tzinfo=UTC)
+        live = self.service.start(request_id=str(uuid.uuid4()))
+        self.clock.value += timedelta(seconds=5)
+        self.service.end(live["id"], request_id=str(uuid.uuid4()))
+
+        # Only the end time is corrected (as if the driver bumped the
+        # displayed end forward by one minute in the editor); the start is
+        # left untouched. Comparing that corrected, whole-minute end against
+        # the *raw* start (still carrying its :50-second offset) would give
+        # a 10-second span and wrongly reject a drive the UI shows as a full
+        # minute long.
+        corrected_end = datetime(2026, 7, 26, 12, 1, 0, tzinfo=UTC)
+        drive = self.service.finalize(
+            live["id"],
+            request_id=str(uuid.uuid4()),
+            road_type="local",
+            corrected_end_utc=corrected_end,
+        )
+        self.assertEqual(drive["started_at_utc"], "2026-07-26T12:00:00Z")
+        self.assertEqual(drive["ended_at_utc"], "2026-07-26T12:01:00Z")
+        self.assertEqual(drive["duration_minutes"], 1)
+
     def test_missing_invalid_and_completed_state_guards(self) -> None:
         with (
             self.database.transaction() as connection,
