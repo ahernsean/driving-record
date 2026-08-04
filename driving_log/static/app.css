@@ -114,7 +114,7 @@ h2 { font-size: 1.2rem; }
 .drive-row small { color: var(--muted); }
 .drive-row .drive-contribution { color: var(--accent); font-weight: 700; }
 .drive-row em { color: #d97706; font-style: normal; font-weight: 700; }
-.history-controls, .filtered-totals, .drive-group {
+.history-controls, .drive-group {
   margin-bottom: 1rem; padding: 1rem; background: var(--panel);
   border: 1px solid var(--border); border-radius: 1rem;
 }
@@ -134,7 +134,7 @@ h2 { font-size: 1.2rem; }
 .weather-filter { grid-template-columns: minmax(0, 1fr); align-content: start; min-width: 0; margin: 0; }
 .weather-filter legend { font-weight: 650; }
 .weather-filter .choice { min-height: 2.3rem; }
-.filtered-totals { display: grid; gap: .2rem; }
+.filtered-totals { display: grid; gap: .2rem; margin-bottom: 1rem; }
 .filtered-totals span, .drive-group summary small { color: var(--muted); }
 .drive-groups { display: grid; gap: .7rem; }
 .drive-group { margin: 0; }
