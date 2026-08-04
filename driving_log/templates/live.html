@@ -32,11 +32,11 @@
       </fieldset>
       <div data-weather-picker>
         <fieldset><legend>Weather</legend>
-          {% for kind in ("rainy", "cloudy", "sunny", "snowy", "windy", "icy") %}
+          {% for kind in ("clear", "cloudy", "rainy", "foggy") %}
             <label class="choice"><input type="checkbox" data-weather-option value="{{ kind }}"> {{ kind | title }}</label>
           {% endfor %}
         </fieldset>
-        <label>Weather notes<input name="weather" data-weather-text placeholder="For example, rainy, cloudy, foggy"></label>
+        <label>Weather notes<input name="weather" data-weather-text placeholder="For example, clear, cloudy, windy"></label>
       </div>
       <label>End location<input name="end_location" placeholder="For example, Apex Friendship High School"></label>
       <label>Notes<textarea name="notes" rows="3"></textarea></label>
