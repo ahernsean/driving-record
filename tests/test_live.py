@@ -120,6 +120,26 @@ class LiveDriveTests(unittest.TestCase):
         self.assertEqual(recovered["status"], "ending")  # type: ignore[index]
         self.assertEqual(RecordService(self.database).list_drives(), [])
 
+    def test_finalize_reports_short_duration_even_when_raw_span_clears_it(self) -> None:
+        # Stored drives are always rounded to the minute, so a raw span that
+        # clears the 30-second minimum but never crosses a minute boundary
+        # (here: :15 to :59, the same wall-clock minute) would otherwise
+        # round down to a zero-minute record and blow up with a confusing
+        # "positive duration" error deep in record creation. The minimum-
+        # duration check compares the same rounded values that get stored,
+        # so it catches this first with the same plain message every other
+        # too-short drive gets.
+        live = self.service.start(request_id=str(uuid.uuid4()))
+        self.clock.value += timedelta(seconds=44)
+        self.service.end(live["id"], request_id=str(uuid.uuid4()))
+        with self.assertRaisesRegex(ValueError, "30 seconds"):
+            self.service.finalize(
+                live["id"],
+                request_id=str(uuid.uuid4()),
+                road_type="local",
+            )
+        self.assertEqual(RecordService(self.database).list_drives(), [])
+
     def test_finalize_can_correct_both_start_and_end(self) -> None:
         live = self.service.start(request_id=str(uuid.uuid4()))
         self.clock.value += timedelta(minutes=30)
@@ -138,6 +158,29 @@ class LiveDriveTests(unittest.TestCase):
         self.assertEqual(drive["started_at_utc"], "2026-07-26T11:55:00Z")
         self.assertEqual(drive["ended_at_utc"], "2026-07-26T12:35:00Z")
         self.assertEqual(drive["duration_minutes"], 40)
+
+    def test_finalize_with_only_end_corrected_uses_minute_consistent_duration(self) -> None:
+        self.clock.value = datetime(2026, 7, 26, 12, 0, 50, tzinfo=UTC)
+        live = self.service.start(request_id=str(uuid.uuid4()))
+        self.clock.value += timedelta(seconds=5)
+        self.service.end(live["id"], request_id=str(uuid.uuid4()))
+
+        # Only the end time is corrected (as if the driver bumped the
+        # displayed end forward by one minute in the editor); the start is
+        # left untouched. Comparing that corrected, whole-minute end against
+        # the *raw* start (still carrying its :50-second offset) would give
+        # a 10-second span and wrongly reject a drive the UI shows as a full
+        # minute long.
+        corrected_end = datetime(2026, 7, 26, 12, 1, 0, tzinfo=UTC)
+        drive = self.service.finalize(
+            live["id"],
+            request_id=str(uuid.uuid4()),
+            road_type="local",
+            corrected_end_utc=corrected_end,
+        )
+        self.assertEqual(drive["started_at_utc"], "2026-07-26T12:00:00Z")
+        self.assertEqual(drive["ended_at_utc"], "2026-07-26T12:01:00Z")
+        self.assertEqual(drive["duration_minutes"], 1)
 
     def test_missing_invalid_and_completed_state_guards(self) -> None:
         with (

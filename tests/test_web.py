@@ -202,15 +202,30 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertIn(">2%</text>", dashboard.text)
                 self.assertNotIn("1.7%", dashboard.text)
+                self.assertNotIn("data-drive-saved-banner", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
                 self.assertIn("data-time-editor", manual_form.text)
                 self.assertIn('aria-label="Duration hours"', manual_form.text)
+                self.assertNotIn("data-precise-start=", manual_form.text)
+                self.assertNotIn("data-minimum-duration-seconds", manual_form.text)
+                self.assertNotIn("data-cancel-form", manual_form.text)
+                self.assertNotIn("Delete drive", manual_form.text)
                 edit_form = await client.get(f"{response.headers['location']}/edit")
                 self.assertIn("data-time-editor", edit_form.text)
                 self.assertIn('value="2026-07-20T12:00"', edit_form.text)
                 self.assertIn('value="2026-07-20T12:30"', edit_form.text)
+                cancel_href = response.headers["location"]
+                self.assertIn(
+                    f'href="{cancel_href}" data-cancel-form="drive-form">Cancel</a>',
+                    edit_form.text,
+                )
+                self.assertIn(
+                    "confirm('Delete this drive? It remains in audit history.')",
+                    edit_form.text,
+                )
+                self.assertIn(">Delete drive</button>", edit_form.text)
                 version_match = re.search(r'name="version" value="(\d+)"', edit_form.text)
                 self.assertIsNotNone(version_match)
                 updated = await client.post(
@@ -254,6 +269,32 @@ class WebTests(unittest.TestCase):
                 csv_export = await client.get("/csv/export")
                 self.assertEqual(csv_export.status_code, 200)
                 self.assertIn("text/csv", csv_export.headers["content-type"])
+
+        self.run_async(scenario)
+
+    def test_invalid_form_returns_plain_json_detail_for_async_submits(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                ) as client,
+            ):
+                malformed = await client.post(
+                    "/drives",
+                    headers={"Accept": "application/json"},
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "started_at_local": "not-a-date",
+                        "ended_at_local": "2026-07-20T12:30",
+                    },
+                )
+                self.assertEqual(malformed.status_code, 400)
+                self.assertEqual(malformed.headers["content-type"], "application/json")
+                body = malformed.json()
+                self.assertNotIn("<", body["detail"])
+                self.assertNotIn("DRIVING_LOG_THEME", body["detail"])
 
         self.run_async(scenario)
 
@@ -666,6 +707,10 @@ class WebTests(unittest.TestCase):
                     self.assertNotIn('name="supervisor_dl_number"', completion.text)
                     self.assertNotIn('name="supervisor_dl_state"', completion.text)
                     self.assertIn("data-time-editor", completion.text)
+                    self.assertIn("data-precise-start=", completion.text)
+                    self.assertIn("data-precise-end=", completion.text)
+                    self.assertIn('data-minimum-duration-seconds="30"', completion.text)
+                    self.assertIn("data-short-drive-warning", completion.text)
                     self.assertIn('name="end_location"', completion.text)
                     start_match = re.search(
                         r'name="started_at_local" value="([^"]+)"', completion.text
@@ -700,10 +745,13 @@ class WebTests(unittest.TestCase):
                     )
                     self.assertEqual(replay.status_code, 303)
                     self.assertEqual(replay.headers["location"], finalized.headers["location"])
-                    detail = await newest.get(finalized.headers["location"])
-                    self.assertIn("Home", detail.text)
-                    dashboard = await newest.get("/")
+                    saved_location = finalized.headers["location"]
+                    self.assertTrue(saved_location.startswith("/?saved="))
+                    saved_drive_id = saved_location.removeprefix("/?saved=")
+                    dashboard = await newest.get(saved_location)
                     self.assertIn("Recorded drives", dashboard.text)
+                    self.assertIn("0h 05m drive saved", dashboard.text)
+                    self.assertIn(f'href="/drives/{saved_drive_id}/edit"', dashboard.text)
 
         self.run_async(scenario)
 

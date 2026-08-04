@@ -6,6 +6,12 @@
   {% else %}
     {% set total_percent = rounded_percent %}
   {% endif %}
+  {% if saved_drive %}
+    <div class="completion-note drive-saved-banner" data-drive-saved-banner>
+      <strong>{{ format_minutes(saved_drive.duration_minutes) }} drive saved</strong>
+      <a class="button compact" href="/drives/{{ saved_drive.id }}/edit">Edit drive</a>
+    </div>
+  {% endif %}
   {% if live %}
     <a class="live-banner" href="/live">
       {{ "Drive in progress" if live.status == "active" else "Finish saving drive" }}

@@ -15,6 +15,9 @@ class NoOpenDriveError(RuntimeError):
     pass
 
 
+MINIMUM_DRIVE_SECONDS = 30
+
+
 class LiveDriveService:
     def __init__(self, database: Database, clock: Callable[[], datetime] | None = None):
         self.database = database
@@ -269,16 +272,21 @@ class LiveDriveService:
                 )
             if row["status"] != "ending" or not row["provisional_ended_at_utc"]:
                 raise ConflictError("live drive must be ending before finalization")
+            # Both endpoints are stored rounded to the minute regardless of
+            # correction, so the length check compares them the same way:
+            # each side is its correction if given, otherwise its raw
+            # recorded time rounded to the minute. That keeps the check
+            # independent per side (correcting one endpoint never changes
+            # how the other, untouched endpoint is read) while still
+            # matching what actually ends up on the saved record.
             start = corrected_start_utc or datetime.fromisoformat(
                 row["started_at_utc"].replace("Z", "+00:00")
-            )
+            ).replace(second=0, microsecond=0)
             end = corrected_end_utc or datetime.fromisoformat(
                 row["provisional_ended_at_utc"].replace("Z", "+00:00")
-            )
-            if (end - start).total_seconds() < 30:
-                raise ValueError("drive must be at least 30 seconds")
-            start = start.replace(second=0, microsecond=0)
-            end = end.replace(second=0, microsecond=0)
+            ).replace(second=0, microsecond=0)
+            if (end - start).total_seconds() < MINIMUM_DRIVE_SECONDS:
+                raise ValueError(f"drive must be at least {MINIMUM_DRIVE_SECONDS} seconds")
             drive_id = str(uuid.uuid5(uuid.UUID(live_id), "completed-drive"))
             drive = RecordService(self.database).create(
                 DriveInput(

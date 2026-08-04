@@ -1,4 +1,9 @@
-<section class="time-editor" data-time-editor>
+<section class="time-editor" data-time-editor
+  {% if precise_start_utc is defined %}data-precise-start="{{ precise_start_utc }}"{% endif %}
+  {% if precise_end_utc is defined %}data-precise-end="{{ precise_end_utc }}"{% endif %}
+  {% if minimum_duration_seconds is defined %}data-minimum-duration-seconds="{{ minimum_duration_seconds }}"{% endif %}
+>
+  <p class="field-warning" data-short-drive-warning hidden></p>
   <label>Start time
     <input required type="datetime-local" name="started_at_local" value="{{ start_local }}" data-time-start>
   </label>

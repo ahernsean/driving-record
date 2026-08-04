@@ -19,6 +19,81 @@ def _available_port() -> int:
 
 
 @pytest.mark.browser
+def test_quick_live_drive_save_reports_short_duration_without_hanging() -> None:
+    port = _available_port()
+    with tempfile.TemporaryDirectory() as temporary:
+        environment = {
+            **os.environ,
+            "DRIVING_LOG_STATE_DIR": temporary,
+            "DRIVING_LOG_PORT": str(port),
+            "DRIVING_LOG_PUBLIC_HOST": f"127.0.0.1:{port}",
+        }
+        server = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "driving_log.app:create_app",
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            url = f"http://127.0.0.1:{port}"
+            for _ in range(100):
+                if server.poll() is not None:
+                    output = server.stdout.read() if server.stdout else ""
+                    raise AssertionError(f"test server exited early:\n{output}")
+                try:
+                    if urllib.request.urlopen(f"{url}/health/ready", timeout=0.2).status == 200:
+                        break
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                output = ""
+                if server.poll() is not None and server.stdout:
+                    output = server.stdout.read()
+                raise AssertionError(f"test server did not become ready\n{output}")
+
+            with sync_playwright() as playwright:
+                local_chrome = os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local"
+                browser = (
+                    playwright.chromium.launch(
+                        executable_path="/usr/bin/google-chrome", headless=True
+                    )
+                    if local_chrome
+                    else playwright.webkit.launch(headless=True)
+                )
+                page = browser.new_page()
+                dialogs: list[str] = []
+                page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+                page.goto(url)
+                page.get_by_role("button", name="Start a drive").click()
+                page.wait_for_url("**/live")
+                page.get_by_role("button", name="End drive").click()
+                page.get_by_text("Drive ended.").wait_for()
+                page.get_by_role("button", name="Save completed drive").click()
+                page.wait_for_timeout(500)
+                assert dialogs == ["drive must be at least 30 seconds"]
+                assert page.url == f"{url}/live"
+                browser.close()
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+
+
+@pytest.mark.browser
 def test_mobile_webkit_live_drive_recovery() -> None:
     port = _available_port()
     with tempfile.TemporaryDirectory() as temporary:

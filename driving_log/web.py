@@ -8,7 +8,7 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData, UploadFile
@@ -19,7 +19,7 @@ from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
 from driving_log.dmv import DmvExportService, SupervisorProfileService, mask_license
-from driving_log.live import LiveDriveService
+from driving_log.live import MINIMUM_DRIVE_SECONDS, LiveDriveService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.solar import apex_daylight_window, resolve_local
 
@@ -275,8 +275,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     def redirect(path: str) -> RedirectResponse:
         return RedirectResponse(path, status_code=303)
 
+    def wants_json(request: Request) -> bool:
+        return "application/json" in request.headers.get("accept", "")
+
     @app.exception_handler(ConflictError)
-    async def conflict_handler(request: Request, exc: ConflictError) -> HTMLResponse:
+    async def conflict_handler(request: Request, exc: ConflictError) -> Response:
+        if wants_json(request):
+            return JSONResponse({"detail": str(exc)}, status_code=409)
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -285,7 +290,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         )
 
     @app.exception_handler(NotFoundError)
-    async def not_found_handler(request: Request, exc: NotFoundError) -> HTMLResponse:
+    async def not_found_handler(request: Request, exc: NotFoundError) -> Response:
+        if wants_json(request):
+            return JSONResponse({"detail": str(exc)}, status_code=404)
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -295,10 +302,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.exception_handler(ValueError)
     @app.exception_handler(KeyError)
-    async def invalid_form_handler(request: Request, exc: ValueError | KeyError) -> HTMLResponse:
+    async def invalid_form_handler(request: Request, exc: ValueError | KeyError) -> Response:
         message = (
             f"Missing required field: {exc.args[0]}" if isinstance(exc, KeyError) else str(exc)
         )
+        if wants_json(request):
+            return JSONResponse({"detail": message}, status_code=400)
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -316,6 +325,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             for week in weeks
             if isinstance(week["overage_minutes"], int) and week["overage_minutes"] > 0
         ]
+        saved_drive_id = request.query_params.get("saved")
+        saved_drive = None
+        if saved_drive_id:
+            try:
+                saved_drive = records.get(saved_drive_id)
+            except NotFoundError:
+                saved_drive = None
         return templates.TemplateResponse(
             request,
             "dashboard.html",
@@ -325,6 +341,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 totals=totals,
                 overages=overages,
                 live=open_drive,
+                saved_drive=saved_drive,
             ),
         )
 
@@ -755,6 +772,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             time_values = {
                 "start_local": _local_input_value(started),
                 "end_local": _local_input_value(ended),
+                "precise_start_utc": open_drive["started_at_utc"],
+                "precise_end_utc": open_drive["provisional_ended_at_utc"],
+                "minimum_duration_seconds": MINIMUM_DRIVE_SECONDS,
                 **_duration_parts(minutes),
             }
         return templates.TemplateResponse(
@@ -835,7 +855,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),
         )
-        return redirect(f"/drives/{drive['id']}")
+        return redirect(f"/?saved={drive['id']}")
 
     @app.get("/imports", response_class=HTMLResponse)
     async def imports_page(request: Request) -> HTMLResponse:

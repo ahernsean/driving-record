@@ -3,6 +3,9 @@
   const root = document.documentElement;
   const metaTheme = document.querySelector('meta[name="theme-color"]');
   const clock = document.querySelector(".live-clock");
+  if (document.querySelector("[data-drive-saved-banner]") && window.history.replaceState) {
+    window.history.replaceState(null, "", window.location.pathname);
+  }
   let boundaries = (window.DRIVING_LOG_THEME || []).map(value => new Date(value));
   let serverOffset = new Date(window.DRIVING_LOG_SERVER_NOW).getTime() - Date.now();
   let themeTimer;
@@ -116,18 +119,71 @@
     const endInput = editor.querySelector("[data-time-end]");
     const hoursInput = editor.querySelector("[data-duration-hours]");
     const minutesInput = editor.querySelector("[data-duration-minutes]");
+    const shortDriveWarning = editor.querySelector("[data-short-drive-warning]");
+    const minimumSeconds = Number(editor.dataset.minimumDurationSeconds);
+    const preciseStart = editor.dataset.preciseStart
+      ? new Date(editor.dataset.preciseStart).getTime()
+      : null;
+    const preciseEnd = editor.dataset.preciseEnd
+      ? new Date(editor.dataset.preciseEnd).getTime()
+      : null;
+    const originalStartValue = startInput.value;
+    const originalEndValue = endInput.value;
+
+    // The datetime-local inputs only carry minute precision, so a drive
+    // shorter than a minute renders identical start/end values here even
+    // though the server holds the true, more precise timestamps. Fall back
+    // to those precise timestamps only while neither field has been edited
+    // from what the server rendered; any edit makes the input values (and
+    // their minute precision) the real intent.
+    const effectiveDurationMs = () => {
+      const start = localInputMilliseconds(startInput.value);
+      const end = localInputMilliseconds(endInput.value);
+      const diffMs = end - start;
+      if (
+        diffMs === 0 &&
+        preciseStart !== null &&
+        preciseEnd !== null &&
+        startInput.value === originalStartValue &&
+        endInput.value === originalEndValue
+      ) {
+        return preciseEnd - preciseStart;
+      }
+      return diffMs;
+    };
+
+    const updateShortDriveWarning = () => {
+      if (!shortDriveWarning || !Number.isFinite(minimumSeconds)) return;
+      const diffMs = effectiveDurationMs();
+      const seconds = Math.round(diffMs / 1000);
+      const tooShort = diffMs >= 0 && seconds < minimumSeconds;
+      shortDriveWarning.hidden = !tooShort;
+      if (tooShort) {
+        const length =
+          seconds <= 0 ? "less than a second" : `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+        shortDriveWarning.textContent =
+          `This drive is only ${length} long — drives must be at least ` +
+          `${minimumSeconds} seconds.`;
+      }
+    };
 
     const updateDuration = () => {
       const start = localInputMilliseconds(startInput.value);
       const end = localInputMilliseconds(endInput.value);
-      const totalMinutes = Math.round((end - start) / 60000);
-      const valid = Number.isFinite(totalMinutes) && totalMinutes > 0;
+      const diffMs = end - start;
+      // Only block on an end that's visibly before the start; let the
+      // server's full-precision minimum-duration check be the real
+      // authority on drives that are merely too short.
+      const valid = Number.isFinite(diffMs) && diffMs >= 0;
       endInput.setCustomValidity(valid ? "" : "End time must be after start time.");
-      if (!valid) return;
-      hoursInput.value = String(Math.floor(totalMinutes / 60));
-      minutesInput.value = String(totalMinutes % 60);
-      hoursInput.setCustomValidity("");
-      minutesInput.setCustomValidity("");
+      if (valid) {
+        const totalMinutes = Math.round(diffMs / 60000);
+        hoursInput.value = String(Math.floor(totalMinutes / 60));
+        minutesInput.value = String(totalMinutes % 60);
+        hoursInput.setCustomValidity("");
+        minutesInput.setCustomValidity("");
+      }
+      updateShortDriveWarning();
     };
 
     const updateEnd = () => {
@@ -139,9 +195,11 @@
       const message = valid ? "" : "Duration must be at least one minute.";
       hoursInput.setCustomValidity(message);
       minutesInput.setCustomValidity(message);
-      if (!valid) return;
-      endInput.value = formatLocalInput(start + totalMinutes * 60000);
-      endInput.setCustomValidity("");
+      if (valid) {
+        endInput.value = formatLocalInput(start + totalMinutes * 60000);
+        endInput.setCustomValidity("");
+      }
+      updateShortDriveWarning();
     };
 
     startInput.addEventListener("input", updateDuration);
@@ -208,6 +266,18 @@
     });
   });
 
+  document.querySelectorAll("[data-cancel-form]").forEach(link => {
+    const form = document.getElementById(link.dataset.cancelForm);
+    if (!form) return;
+    const serialize = () => new URLSearchParams(new FormData(form)).toString();
+    const initialState = serialize();
+    link.addEventListener("click", event => {
+      if (serialize() !== initialState && !confirm("Discard your changes to this drive?")) {
+        event.preventDefault();
+      }
+    });
+  });
+
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;
@@ -220,6 +290,7 @@
           method: form.method || "POST",
           body: new FormData(form),
           cache: "no-store",
+          headers: { Accept: "application/json" },
         });
         if (response.redirected) {
           window.location.assign(response.url);
