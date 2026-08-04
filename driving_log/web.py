@@ -325,6 +325,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             for week in weeks
             if isinstance(week["overage_minutes"], int) and week["overage_minutes"] > 0
         ]
+        saved_drive_id = request.query_params.get("saved")
+        saved_drive = None
+        if saved_drive_id:
+            try:
+                saved_drive = records.get(saved_drive_id)
+            except NotFoundError:
+                saved_drive = None
         return templates.TemplateResponse(
             request,
             "dashboard.html",
@@ -334,7 +341,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 totals=totals,
                 overages=overages,
                 live=open_drive,
-                drive_saved=request.query_params.get("saved") == "1",
+                saved_drive=saved_drive,
             ),
         )
 
@@ -836,7 +843,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             if end_text == _local_input_value(current["provisional_ended_at_utc"])
             else _parse_local(end_text, str(form.get("end_fold", "")))
         )
-        live.finalize(
+        drive = live.finalize(
             live_id,
             request_id=str(form["request_id"]),
             road_type=str(form.get("road_type", "unknown")),
@@ -848,7 +855,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),
         )
-        return redirect("/?saved=1")
+        return redirect(f"/?saved={drive['id']}")
 
     @app.get("/imports", response_class=HTMLResponse)
     async def imports_page(request: Request) -> HTMLResponse:

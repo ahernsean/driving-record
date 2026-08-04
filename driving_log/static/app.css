@@ -162,6 +162,10 @@ input, textarea, select {
   margin: 0 0 1rem; padding: .7rem .9rem; border-left: .25rem solid var(--accent);
   border-radius: .35rem; background: color-mix(in srgb, var(--accent) 8%, var(--panel));
 }
+.drive-saved-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+}
+.drive-saved-banner .button { margin: 0; }
 .time-editor {
   display: grid; gap: .8rem; padding: 1rem; border: 1px solid var(--border);
   border-radius: 1rem; background: var(--panel);

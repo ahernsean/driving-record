@@ -202,7 +202,7 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertIn(">2%</text>", dashboard.text)
                 self.assertNotIn("1.7%", dashboard.text)
-                self.assertNotIn("Drive saved.", dashboard.text)
+                self.assertNotIn("data-drive-saved-banner", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
@@ -733,10 +733,13 @@ class WebTests(unittest.TestCase):
                     )
                     self.assertEqual(replay.status_code, 303)
                     self.assertEqual(replay.headers["location"], finalized.headers["location"])
-                    self.assertEqual(finalized.headers["location"], "/?saved=1")
-                    dashboard = await newest.get(finalized.headers["location"])
+                    saved_location = finalized.headers["location"]
+                    self.assertTrue(saved_location.startswith("/?saved="))
+                    saved_drive_id = saved_location.removeprefix("/?saved=")
+                    dashboard = await newest.get(saved_location)
                     self.assertIn("Recorded drives", dashboard.text)
-                    self.assertIn("Drive saved.", dashboard.text)
+                    self.assertIn("0h 05m drive saved", dashboard.text)
+                    self.assertIn(f'href="/drives/{saved_drive_id}/edit"', dashboard.text)
 
         self.run_async(scenario)
 
