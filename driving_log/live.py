@@ -272,29 +272,21 @@ class LiveDriveService:
                 )
             if row["status"] != "ending" or not row["provisional_ended_at_utc"]:
                 raise ConflictError("live drive must be ending before finalization")
-            # Corrected values come from minute-precision inputs. If only one
-            # side was corrected, comparing it against the other side's raw,
-            # sub-minute-precision timestamp would produce a duration that
-            # has nothing to do with what the editor displayed (e.g. adding
-            # a full displayed minute could still land under the minimum).
-            # Once any correction is made, round both sides to the minute so
-            # the length check matches what's on screen; an untouched
-            # submission still gets checked against the true elapsed time.
-            edited = corrected_start_utc is not None or corrected_end_utc is not None
-            start_from_row = datetime.fromisoformat(row["started_at_utc"].replace("Z", "+00:00"))
-            end_from_row = datetime.fromisoformat(
+            # Both endpoints are stored rounded to the minute regardless of
+            # correction, so the length check compares them the same way:
+            # each side is its correction if given, otherwise its raw
+            # recorded time rounded to the minute. That keeps the check
+            # independent per side (correcting one endpoint never changes
+            # how the other, untouched endpoint is read) while still
+            # matching what actually ends up on the saved record.
+            start = corrected_start_utc or datetime.fromisoformat(
+                row["started_at_utc"].replace("Z", "+00:00")
+            ).replace(second=0, microsecond=0)
+            end = corrected_end_utc or datetime.fromisoformat(
                 row["provisional_ended_at_utc"].replace("Z", "+00:00")
-            )
-            start = corrected_start_utc or (
-                start_from_row.replace(second=0, microsecond=0) if edited else start_from_row
-            )
-            end = corrected_end_utc or (
-                end_from_row.replace(second=0, microsecond=0) if edited else end_from_row
-            )
+            ).replace(second=0, microsecond=0)
             if (end - start).total_seconds() < MINIMUM_DRIVE_SECONDS:
                 raise ValueError(f"drive must be at least {MINIMUM_DRIVE_SECONDS} seconds")
-            start = start.replace(second=0, microsecond=0)
-            end = end.replace(second=0, microsecond=0)
             drive_id = str(uuid.uuid5(uuid.UUID(live_id), "completed-drive"))
             drive = RecordService(self.database).create(
                 DriveInput(
