@@ -155,14 +155,23 @@
     const text = picker.querySelector("[data-weather-text]");
     const options = Array.from(picker.querySelectorAll("[data-weather-option]"));
     const labels = options.map(option => option.value.toLowerCase());
-    options.forEach(option => {
-      option.addEventListener("change", () => {
-        const tokens = text.value.split(",").map(token => token.trim()).filter(Boolean);
-        const extra = tokens.filter(token => !labels.includes(token.toLowerCase()));
-        const checked = options.filter(opt => opt.checked).map(opt => opt.value);
-        text.value = checked.concat(extra).join(", ");
+
+    const syncTextFromCheckboxes = () => {
+      const tokens = text.value.split(",").map(token => token.trim()).filter(Boolean);
+      const extra = tokens.filter(token => !labels.includes(token.toLowerCase()));
+      const checked = options.filter(option => option.checked).map(option => option.value);
+      text.value = checked.concat(extra).join(", ");
+    };
+
+    const syncCheckboxesFromText = () => {
+      const tokens = text.value.split(",").map(token => token.trim().toLowerCase()).filter(Boolean);
+      options.forEach(option => {
+        option.checked = tokens.includes(option.value.toLowerCase());
       });
-    });
+    };
+
+    options.forEach(option => option.addEventListener("change", syncTextFromCheckboxes));
+    text.addEventListener("input", syncCheckboxesFromText);
   });
 
   document.querySelectorAll("form[data-history-filters]").forEach(form => {
