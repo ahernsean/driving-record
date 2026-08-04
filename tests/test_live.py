@@ -120,6 +120,26 @@ class LiveDriveTests(unittest.TestCase):
         self.assertEqual(recovered["status"], "ending")  # type: ignore[index]
         self.assertEqual(RecordService(self.database).list_drives(), [])
 
+    def test_finalize_reports_short_duration_even_when_raw_span_clears_it(self) -> None:
+        # Stored drives are always rounded to the minute, so a raw span that
+        # clears the 30-second minimum but never crosses a minute boundary
+        # (here: :15 to :59, the same wall-clock minute) would otherwise
+        # round down to a zero-minute record and blow up with a confusing
+        # "positive duration" error deep in record creation. The minimum-
+        # duration check compares the same rounded values that get stored,
+        # so it catches this first with the same plain message every other
+        # too-short drive gets.
+        live = self.service.start(request_id=str(uuid.uuid4()))
+        self.clock.value += timedelta(seconds=44)
+        self.service.end(live["id"], request_id=str(uuid.uuid4()))
+        with self.assertRaisesRegex(ValueError, "30 seconds"):
+            self.service.finalize(
+                live["id"],
+                request_id=str(uuid.uuid4()),
+                road_type="local",
+            )
+        self.assertEqual(RecordService(self.database).list_drives(), [])
+
     def test_finalize_can_correct_both_start_and_end(self) -> None:
         live = self.service.start(request_id=str(uuid.uuid4()))
         self.clock.value += timedelta(minutes=30)
