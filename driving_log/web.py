@@ -19,7 +19,7 @@ from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
 from driving_log.dmv import DmvExportService, SupervisorProfileService, mask_license
-from driving_log.live import LiveDriveService
+from driving_log.live import MINIMUM_DRIVE_SECONDS, LiveDriveService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.solar import apex_daylight_window, resolve_local
 
@@ -334,6 +334,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 totals=totals,
                 overages=overages,
                 live=open_drive,
+                drive_saved=request.query_params.get("saved") == "1",
             ),
         )
 
@@ -764,6 +765,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             time_values = {
                 "start_local": _local_input_value(started),
                 "end_local": _local_input_value(ended),
+                "precise_start_utc": open_drive["started_at_utc"],
+                "precise_end_utc": open_drive["provisional_ended_at_utc"],
+                "minimum_duration_seconds": MINIMUM_DRIVE_SECONDS,
                 **_duration_parts(minutes),
             }
         return templates.TemplateResponse(
@@ -844,7 +848,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),
         )
-        return redirect("/")
+        return redirect("/?saved=1")
 
     @app.get("/imports", response_class=HTMLResponse)
     async def imports_page(request: Request) -> HTMLResponse:

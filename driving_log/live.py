@@ -15,6 +15,9 @@ class NoOpenDriveError(RuntimeError):
     pass
 
 
+MINIMUM_DRIVE_SECONDS = 30
+
+
 class LiveDriveService:
     def __init__(self, database: Database, clock: Callable[[], datetime] | None = None):
         self.database = database
@@ -275,8 +278,8 @@ class LiveDriveService:
             end = corrected_end_utc or datetime.fromisoformat(
                 row["provisional_ended_at_utc"].replace("Z", "+00:00")
             )
-            if (end - start).total_seconds() < 30:
-                raise ValueError("drive must be at least 30 seconds")
+            if (end - start).total_seconds() < MINIMUM_DRIVE_SECONDS:
+                raise ValueError(f"drive must be at least {MINIMUM_DRIVE_SECONDS} seconds")
             start = start.replace(second=0, microsecond=0)
             end = end.replace(second=0, microsecond=0)
             drive_id = str(uuid.uuid5(uuid.UUID(live_id), "completed-drive"))

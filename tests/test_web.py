@@ -202,11 +202,14 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertIn(">2%</text>", dashboard.text)
                 self.assertNotIn("1.7%", dashboard.text)
+                self.assertNotIn("Drive saved.", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
                 self.assertIn("data-time-editor", manual_form.text)
                 self.assertIn('aria-label="Duration hours"', manual_form.text)
+                self.assertNotIn("data-precise-start=", manual_form.text)
+                self.assertNotIn("data-minimum-duration-seconds", manual_form.text)
                 edit_form = await client.get(f"{response.headers['location']}/edit")
                 self.assertIn("data-time-editor", edit_form.text)
                 self.assertIn('value="2026-07-20T12:00"', edit_form.text)
@@ -692,6 +695,10 @@ class WebTests(unittest.TestCase):
                     self.assertNotIn('name="supervisor_dl_number"', completion.text)
                     self.assertNotIn('name="supervisor_dl_state"', completion.text)
                     self.assertIn("data-time-editor", completion.text)
+                    self.assertIn("data-precise-start=", completion.text)
+                    self.assertIn("data-precise-end=", completion.text)
+                    self.assertIn('data-minimum-duration-seconds="30"', completion.text)
+                    self.assertIn("data-short-drive-warning", completion.text)
                     self.assertIn('name="end_location"', completion.text)
                     start_match = re.search(
                         r'name="started_at_local" value="([^"]+)"', completion.text
@@ -726,9 +733,10 @@ class WebTests(unittest.TestCase):
                     )
                     self.assertEqual(replay.status_code, 303)
                     self.assertEqual(replay.headers["location"], finalized.headers["location"])
-                    self.assertEqual(finalized.headers["location"], "/")
+                    self.assertEqual(finalized.headers["location"], "/?saved=1")
                     dashboard = await newest.get(finalized.headers["location"])
                     self.assertIn("Recorded drives", dashboard.text)
+                    self.assertIn("Drive saved.", dashboard.text)
 
         self.run_async(scenario)
 

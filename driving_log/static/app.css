@@ -169,6 +169,11 @@ input, textarea, select {
 .time-editor > label, .time-editor input[type="datetime-local"] {
   min-width: 0; max-width: 100%;
 }
+.field-warning {
+  margin: 0; padding: .6rem .8rem; border-radius: .6rem; font-weight: 650;
+  background: var(--warning); color: var(--danger);
+}
+.field-warning[hidden] { display: none; }
 .time-duration { display: grid; gap: .4rem; }
 .time-label { font-weight: 650; }
 .duration-editor { display: flex; gap: .7rem; }

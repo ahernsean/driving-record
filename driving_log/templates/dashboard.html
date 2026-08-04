@@ -6,6 +6,9 @@
   {% else %}
     {% set total_percent = rounded_percent %}
   {% endif %}
+  {% if drive_saved %}
+    <p class="completion-note" data-drive-saved-banner><strong>Drive saved.</strong> It's now counted below.</p>
+  {% endif %}
   {% if live %}
     <a class="live-banner" href="/live">
       {{ "Drive in progress" if live.status == "active" else "Finish saving drive" }}
