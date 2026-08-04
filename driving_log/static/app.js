@@ -192,6 +192,7 @@
           method: form.method || "POST",
           body: new FormData(form),
           cache: "no-store",
+          headers: { Accept: "application/json" },
         });
         if (response.redirected) {
           window.location.assign(response.url);

@@ -8,7 +8,7 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData, UploadFile
@@ -275,8 +275,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     def redirect(path: str) -> RedirectResponse:
         return RedirectResponse(path, status_code=303)
 
+    def wants_json(request: Request) -> bool:
+        return "application/json" in request.headers.get("accept", "")
+
     @app.exception_handler(ConflictError)
-    async def conflict_handler(request: Request, exc: ConflictError) -> HTMLResponse:
+    async def conflict_handler(request: Request, exc: ConflictError) -> Response:
+        if wants_json(request):
+            return JSONResponse({"detail": str(exc)}, status_code=409)
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -285,7 +290,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         )
 
     @app.exception_handler(NotFoundError)
-    async def not_found_handler(request: Request, exc: NotFoundError) -> HTMLResponse:
+    async def not_found_handler(request: Request, exc: NotFoundError) -> Response:
+        if wants_json(request):
+            return JSONResponse({"detail": str(exc)}, status_code=404)
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -295,10 +302,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     @app.exception_handler(ValueError)
     @app.exception_handler(KeyError)
-    async def invalid_form_handler(request: Request, exc: ValueError | KeyError) -> HTMLResponse:
+    async def invalid_form_handler(request: Request, exc: ValueError | KeyError) -> Response:
         message = (
             f"Missing required field: {exc.args[0]}" if isinstance(exc, KeyError) else str(exc)
         )
+        if wants_json(request):
+            return JSONResponse({"detail": message}, status_code=400)
         return templates.TemplateResponse(
             request,
             "error.html",

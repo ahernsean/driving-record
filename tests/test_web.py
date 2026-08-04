@@ -257,6 +257,32 @@ class WebTests(unittest.TestCase):
 
         self.run_async(scenario)
 
+    def test_invalid_form_returns_plain_json_detail_for_async_submits(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                ) as client,
+            ):
+                malformed = await client.post(
+                    "/drives",
+                    headers={"Accept": "application/json"},
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "started_at_local": "not-a-date",
+                        "ended_at_local": "2026-07-20T12:30",
+                    },
+                )
+                self.assertEqual(malformed.status_code, 400)
+                self.assertEqual(malformed.headers["content-type"], "application/json")
+                body = malformed.json()
+                self.assertNotIn("<", body["detail"])
+                self.assertNotIn("DRIVING_LOG_THEME", body["detail"])
+
+        self.run_async(scenario)
+
     def test_drive_history_filters_totals_and_groups(self) -> None:
         async def scenario() -> None:
             async with (
