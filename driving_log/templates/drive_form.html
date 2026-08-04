@@ -17,9 +17,8 @@
         <label class="choice"><input type="radio" name="road_type" value="{{ kind }}" {{ "checked" if (drive and drive.road_type == kind) or (not drive and kind == "unknown") }}> {{ kind | title }}</label>
       {% endfor %}
     </fieldset>
-    <label>Weather
-      <input name="weather" value="{{ drive.weather if drive else '' }}">
-    </label>
+    {% set weather_value = drive.weather if drive else "" %}
+    {% include "_weather_picker.html" %}
     <label>End location
       <input name="end_location" value="{{ drive.end_location if drive else '' }}" placeholder="For example, Apex Friendship High School">
     </label>
