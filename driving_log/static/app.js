@@ -120,6 +120,17 @@
     const hoursInput = editor.querySelector("[data-duration-hours]");
     const minutesInput = editor.querySelector("[data-duration-minutes]");
     const shortDriveWarning = editor.querySelector("[data-short-drive-warning]");
+    const overlapWarning = editor.querySelector("[data-overlap-warning]");
+    // These intervals arrive as local datetime-local strings (not UTC), so
+    // parsing them the same way as the form's own start/end inputs keeps the
+    // comparison correct no matter what timezone the browser's clock is set
+    // to — only the relative ordering matters here, not the absolute instant.
+    const existingIntervals = editor.dataset.existingIntervals
+      ? JSON.parse(editor.dataset.existingIntervals).map(interval => ({
+          start: localInputMilliseconds(interval.start),
+          end: localInputMilliseconds(interval.end),
+        }))
+      : [];
     const minimumSeconds = Number(editor.dataset.minimumDurationSeconds);
     const preciseStart = editor.dataset.preciseStart
       ? new Date(editor.dataset.preciseStart).getTime()
@@ -167,6 +178,26 @@
       }
     };
 
+    const updateOverlapWarning = () => {
+      if (!overlapWarning || !existingIntervals.length) return;
+      const start = localInputMilliseconds(startInput.value);
+      const end = localInputMilliseconds(endInput.value);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        overlapWarning.hidden = true;
+        return;
+      }
+      const overlapCount = existingIntervals.filter(
+        interval => start < interval.end && end > interval.start
+      ).length;
+      overlapWarning.hidden = overlapCount === 0;
+      if (overlapCount) {
+        overlapWarning.textContent =
+          overlapCount === 1
+            ? "This drive overlaps another saved drive."
+            : `This drive overlaps ${overlapCount} other saved drives.`;
+      }
+    };
+
     const updateDuration = () => {
       const start = localInputMilliseconds(startInput.value);
       const end = localInputMilliseconds(endInput.value);
@@ -184,6 +215,7 @@
         minutesInput.setCustomValidity("");
       }
       updateShortDriveWarning();
+      updateOverlapWarning();
     };
 
     const updateEnd = () => {
@@ -200,6 +232,7 @@
         endInput.setCustomValidity("");
       }
       updateShortDriveWarning();
+      updateOverlapWarning();
     };
 
     startInput.addEventListener("input", updateDuration);

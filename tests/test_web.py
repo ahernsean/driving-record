@@ -272,6 +272,91 @@ class WebTests(unittest.TestCase):
 
         self.run_async(scenario)
 
+    def test_manual_entry_has_no_driver_prompt_and_supports_prefill_from_prior_drive(
+        self,
+    ) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                new_form = await client.get("/drives/new")
+                self.assertNotIn("<label>Driver", new_form.text)
+                self.assertIn(
+                    '<input type="hidden" name="driver_name" value="Daniel Ahern">',
+                    new_form.text,
+                )
+
+                first = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:00",
+                        "ended_at_local": "2026-07-20T12:30",
+                        "road_type": "highway",
+                        "weather": "clear",
+                        "end_location": "Home",
+                    },
+                )
+                self.assertEqual(first.status_code, 303)
+                first_id = first.headers["location"].rsplit("/", 1)[-1]
+
+                detail = await client.get(first.headers["location"])
+                self.assertIn(f'href="/drives/new?from={first_id}"', detail.text)
+                self.assertIn("Add another manual drive", detail.text)
+
+                edit_form = await client.get(f"{first.headers['location']}/edit")
+                self.assertNotIn("<label>Driver", edit_form.text)
+
+                prefilled = await client.get(f"/drives/new?from={first_id}")
+                self.assertEqual(prefilled.status_code, 200)
+                self.assertIn('value="2026-07-20T12:30"', prefilled.text)
+                self.assertIn('value="2026-07-20T13:00"', prefilled.text)
+                self.assertIn('value="Sean Ahern"', prefilled.text)
+                self.assertIn('value="Home"', prefilled.text)
+                self.assertIn(
+                    'name="road_type" value="highway" checked',
+                    prefilled.text,
+                )
+                self.assertIn("clear", prefilled.text)
+                self.assertIn("data-existing-intervals=", prefilled.text)
+                # Existing intervals are embedded as local wall-clock strings
+                # (matching the datetime-local inputs), not UTC, so the
+                # browser can compare them without any timezone conversion.
+                self.assertIn("2026-07-20T12:00", prefilled.text)
+
+                unknown_from = await client.get("/drives/new?from=does-not-exist")
+                self.assertEqual(unknown_from.status_code, 200)
+                self.assertIn('value="Sean Ahern"', unknown_from.text)
+                self.assertNotIn('value="Home"', unknown_from.text)
+
+                overlapping = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:15",
+                        "ended_at_local": "2026-07-20T12:45",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(overlapping.status_code, 303)
+                second_id = overlapping.headers["location"].rsplit("/", 1)[-1]
+
+                edit_second = await client.get(f"/drives/{second_id}/edit")
+                intervals_match = re.search(r"data-existing-intervals='([^']*)'", edit_second.text)
+                self.assertIsNotNone(intervals_match)
+                intervals_json = intervals_match.group(1)  # type: ignore[union-attr]
+                self.assertIn("2026-07-20T12:00", intervals_json)
+                self.assertNotIn("2026-07-20T12:15", intervals_json)
+
+        self.run_async(scenario)
+
     def test_invalid_form_returns_plain_json_detail_for_async_submits(self) -> None:
         async def scenario() -> None:
             async with (
