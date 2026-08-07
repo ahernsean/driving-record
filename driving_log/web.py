@@ -634,9 +634,45 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             ),
         )
 
+    def other_intervals(exclude_drive_id: str | None) -> list[dict[str, str]]:
+        # Emitted in the same local wall-clock format as the start/end inputs
+        # (rather than UTC) so the browser can compare them directly against
+        # the datetime-local field values without any timezone conversion —
+        # that keeps the check correct regardless of the device's own clock
+        # timezone, the same way duration math already does.
+        return [
+            {
+                "start": _local_input_value(str(row["started_at_utc"])),
+                "end": _local_input_value(str(row["ended_at_utc"])),
+            }
+            for row in records.list_drives()
+            if row["id"] != exclude_drive_id
+        ]
+
     @app.get("/drives/new", response_class=HTMLResponse)
     async def drive_new(request: Request) -> HTMLResponse:
         now = datetime.now(ZONE).replace(second=0, microsecond=0)
+        start_local = _local_input_value(now)
+        end_local = _local_input_value(now + timedelta(minutes=30))
+        prefill: dict[str, str] | None = None
+        prior_drive_id = request.query_params.get("from")
+        if prior_drive_id:
+            try:
+                prior = records.get(prior_drive_id)
+            except NotFoundError:
+                prior = None
+            if prior:
+                prior_end = datetime.fromisoformat(
+                    str(prior["ended_at_utc"]).replace("Z", "+00:00")
+                )
+                start_local = _local_input_value(prior_end)
+                end_local = _local_input_value(prior_end + timedelta(minutes=30))
+                prefill = {
+                    "supervisor_name": str(prior["supervisor_name"] or "Sean Ahern"),
+                    "road_type": str(prior["road_type"]),
+                    "weather": str(prior["weather"]),
+                    "end_location": str(prior["end_location"]),
+                }
         return templates.TemplateResponse(
             request,
             "drive_form.html",
@@ -644,9 +680,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 request,
                 title="Add drive",
                 drive=None,
-                start_local=_local_input_value(now),
-                end_local=_local_input_value(now + timedelta(minutes=30)),
+                prefill=prefill,
+                start_local=start_local,
+                end_local=end_local,
                 action="/drives",
+                other_intervals=other_intervals(None),
                 **_duration_parts(30),
             ),
         )
@@ -703,6 +741,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 start_local=_local_input_value(drive["started_at_utc"]),
                 end_local=_local_input_value(drive["ended_at_utc"]),
                 action=f"/drives/{drive_id}/edit",
+                other_intervals=other_intervals(drive_id),
                 **_duration_parts(int(drive["duration_minutes"])),
             ),
         )
