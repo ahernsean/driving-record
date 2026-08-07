@@ -1,13 +1,12 @@
 # CI validation
 
-Before pushing a pull-request change, read `.github/workflows/ci.yml` and run
-the matching checks. Do not report a check as passing unless its command has
-completed with exit code 0 and its pytest/formatter summary is present in the
-terminal output. An empty or prematurely returned tool response is not test
-evidence.
+Before pushing a pull-request change, make sure your changes are tested. Read
+`.github/workflows/ci.yml` to get a sense of the tests that will run in CI.
+Don't assume a test is passing unless its command has completed with exit code
+0 and its pytest/formatter summary is present in the terminal output. An empty
+or prematurely returned tool response is not test evidence.
 
-For the current workflow, run the quality and non-browser suite exactly as CI
-does (with `PYTHONPATH=.`):
+For the current workflow, note that CI runs with `PYTHONPATH=.`:
 
 ```sh
 PYTHONPATH=. .venv/bin/ruff check .
