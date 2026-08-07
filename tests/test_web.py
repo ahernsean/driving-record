@@ -364,6 +364,9 @@ class WebTests(unittest.TestCase):
                 self.assertIn("rain", grouped.text)
                 self.assertIn("0h 45m day", grouped.text)
                 self.assertIn("0h 30m night", grouped.text)
+                self.assertIn("71% of total", grouped.text)
+                self.assertIn("29% of total", grouped.text)
+                self.assertNotIn('<details class="drive-group" open>', grouped.text)
 
                 weather_filtered = await client.get("/drives?weather=clear&weather=rain")
                 self.assertIn("3 drives · 1h 45m", weather_filtered.text)
