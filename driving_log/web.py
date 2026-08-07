@@ -578,6 +578,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 )
             else:
                 groups.sort(key=lambda group: str(group["label"]).casefold())
+            total_minutes = totals["minutes"]
+            for group in groups:
+                group["percentage"] = (
+                    round(cast(int, group["minutes"]) / total_minutes * 100) if total_minutes else 0
+                )
         return templates.TemplateResponse(
             request,
             "drives.html",
