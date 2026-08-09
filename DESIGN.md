@@ -515,7 +515,7 @@ Shows:
 - advisory card listing any weeks over the 10-hour cap and each overage amount
 - active timer or ending-drive completion banner when a live row is in progress
 - quick actions:
-  `Start a drive`, `Add drive manually`, `View drives`, `Import`, `Export`
+  `Start a drive`, `Add drive`, `View drives`, `Import`, `Export`
 
 Gauge behavior:
 

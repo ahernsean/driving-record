@@ -1,14 +1,18 @@
-<section class="time-editor" data-time-editor
+<section class="time-editor" data-time-editor data-time-zone="{{ time_zone }}"
   {% if precise_start_utc is defined %}data-precise-start="{{ precise_start_utc }}"{% endif %}
   {% if precise_end_utc is defined %}data-precise-end="{{ precise_end_utc }}"{% endif %}
   {% if minimum_duration_seconds is defined %}data-minimum-duration-seconds="{{ minimum_duration_seconds }}"{% endif %}
+  {% if other_intervals is defined %}data-existing-intervals='{{ other_intervals | tojson }}'{% endif %}
 >
   <p class="field-warning" data-short-drive-warning hidden></p>
+  <p class="field-warning" data-overlap-warning hidden></p>
   <label>Start time
     <input required type="datetime-local" name="started_at_local" value="{{ start_local }}" data-time-start>
+    <input type="hidden" name="start_fold" value="{{ start_fold }}" data-time-start-fold>
   </label>
   <label>End time
     <input required type="datetime-local" name="ended_at_local" value="{{ end_local }}" data-time-end>
+    <input type="hidden" name="end_fold" value="{{ end_fold }}" data-time-end-fold>
   </label>
   <div class="time-duration">
     <span class="time-label">Duration</span>

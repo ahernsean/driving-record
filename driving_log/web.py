@@ -69,6 +69,10 @@ def _local_input_value(value: str | datetime) -> str:
     return _local_datetime(value).strftime("%Y-%m-%dT%H:%M")
 
 
+def _local_fold(value: str | datetime) -> int:
+    return _local_datetime(value).fold
+
+
 def _duration_parts(minutes: int) -> dict[str, int]:
     return {
         "duration_hours": minutes // 60,
@@ -634,9 +638,46 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             ),
         )
 
+    def other_intervals(exclude_drive_id: str | None) -> list[dict[str, str]]:
+        # Keep these as UTC instants. A local wall-clock string is ambiguous
+        # during the repeated hour at the autumn DST transition.
+        return [
+            {
+                "start": str(row["started_at_utc"]),
+                "end": str(row["ended_at_utc"]),
+            }
+            for row in records.list_drives()
+            if row["id"] != exclude_drive_id
+        ]
+
     @app.get("/drives/new", response_class=HTMLResponse)
     async def drive_new(request: Request) -> HTMLResponse:
         now = datetime.now(ZONE).replace(second=0, microsecond=0)
+        started = now.astimezone(UTC)
+        ended = started + timedelta(minutes=30)
+        start_local = _local_input_value(started)
+        end_local = _local_input_value(ended)
+        prefill: dict[str, str] | None = None
+        prior_drive_id = request.query_params.get("from")
+        if prior_drive_id:
+            try:
+                prior = records.get(prior_drive_id)
+            except NotFoundError:
+                prior = None
+            if prior:
+                prior_end = datetime.fromisoformat(
+                    str(prior["ended_at_utc"]).replace("Z", "+00:00")
+                )
+                started = prior_end
+                ended = prior_end + timedelta(minutes=30)
+                start_local = _local_input_value(started)
+                end_local = _local_input_value(ended)
+                prefill = {
+                    "supervisor_name": str(prior["supervisor_name"] or "Sean Ahern"),
+                    "road_type": str(prior["road_type"]),
+                    "weather": str(prior["weather"]),
+                    "end_location": str(prior["end_location"]),
+                }
         return templates.TemplateResponse(
             request,
             "drive_form.html",
@@ -644,9 +685,14 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 request,
                 title="Add drive",
                 drive=None,
-                start_local=_local_input_value(now),
-                end_local=_local_input_value(now + timedelta(minutes=30)),
+                prefill=prefill,
+                start_local=start_local,
+                end_local=end_local,
+                start_fold=_local_fold(started),
+                end_fold=_local_fold(ended),
+                time_zone=ZONE.key,
                 action="/drives",
+                other_intervals=other_intervals(None),
                 **_duration_parts(30),
             ),
         )
@@ -702,7 +748,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 drive=drive,
                 start_local=_local_input_value(drive["started_at_utc"]),
                 end_local=_local_input_value(drive["ended_at_utc"]),
+                start_fold=_local_fold(drive["started_at_utc"]),
+                end_fold=_local_fold(drive["ended_at_utc"]),
+                time_zone=ZONE.key,
                 action=f"/drives/{drive_id}/edit",
+                other_intervals=other_intervals(drive_id),
                 **_duration_parts(int(drive["duration_minutes"])),
             ),
         )
@@ -772,6 +822,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             time_values = {
                 "start_local": _local_input_value(started),
                 "end_local": _local_input_value(ended),
+                "start_fold": started.fold,
+                "end_fold": ended.fold,
+                "time_zone": ZONE.key,
                 "precise_start_utc": open_drive["started_at_utc"],
                 "precise_end_utc": open_drive["provisional_ended_at_utc"],
                 "minimum_duration_seconds": MINIMUM_DRIVE_SECONDS,

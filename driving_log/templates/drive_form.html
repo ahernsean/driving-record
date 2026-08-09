@@ -4,28 +4,30 @@
   <form id="drive-form" class="stacked-form" method="post" action="{{ action }}" data-async-submit>
     <input type="hidden" name="request_id" value="{{ '10000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     {% if drive %}<input type="hidden" name="version" value="{{ drive.version }}">{% endif %}
+    <input type="hidden" name="driver_name" value="{{ drive.driver_name if drive else 'Daniel Ahern' }}">
     {% include "_time_editor.html" %}
-    <label>Driver
-      <input required name="driver_name" value="{{ drive.driver_name if drive else 'Daniel Ahern' }}">
-    </label>
     <label>Supervising driver
-      <input name="supervisor_name" value="{{ drive.supervisor_name if drive and drive.supervisor_name else 'Sean Ahern' }}">
+      <input name="supervisor_name" value="{{ drive.supervisor_name if drive and drive.supervisor_name else (prefill.supervisor_name if prefill else 'Sean Ahern') }}">
     </label>
     <fieldset>
       <legend>Road type</legend>
+      {% set selected_road_type = drive.road_type if drive else (prefill.road_type if prefill else "unknown") %}
       {% for kind in ("local", "highway", "mixed", "unknown") %}
-        <label class="choice"><input type="radio" name="road_type" value="{{ kind }}" {{ "checked" if (drive and drive.road_type == kind) or (not drive and kind == "unknown") }}> {{ kind | title }}</label>
+        <label class="choice"><input type="radio" name="road_type" value="{{ kind }}" {{ "checked" if selected_road_type == kind }}> {{ kind | title }}</label>
       {% endfor %}
     </fieldset>
-    {% set weather_value = drive.weather if drive else "" %}
+    {% set weather_value = drive.weather if drive else (prefill.weather if prefill else "") %}
     {% include "_weather_picker.html" %}
     <label>End location
-      <input name="end_location" value="{{ drive.end_location if drive else '' }}" placeholder="For example, Apex Friendship High School">
+      <input name="end_location" value="{{ drive.end_location if drive else (prefill.end_location if prefill else '') }}" placeholder="For example, Apex Friendship High School">
     </label>
     <label>Notes
       <textarea name="notes" rows="3">{{ drive.notes if drive else '' }}</textarea>
     </label>
     <button class="primary" type="submit">Save drive</button>
+    {% if not drive %}
+      <a class="button" href="/" data-cancel-form="drive-form">Cancel</a>
+    {% endif %}
   </form>
   {% if drive %}
     <div class="actions">

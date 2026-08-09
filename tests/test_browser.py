@@ -94,6 +94,80 @@ def test_quick_live_drive_save_reports_short_duration_without_hanging() -> None:
 
 
 @pytest.mark.browser
+def test_overlap_warning_distinguishes_dst_fallback_folds() -> None:
+    port = _available_port()
+    with tempfile.TemporaryDirectory() as temporary:
+        environment = {
+            **os.environ,
+            "DRIVING_LOG_STATE_DIR": temporary,
+            "DRIVING_LOG_PORT": str(port),
+            "DRIVING_LOG_PUBLIC_HOST": f"127.0.0.1:{port}",
+        }
+        server = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "driving_log.app:create_app",
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            url = f"http://127.0.0.1:{port}"
+            for _ in range(100):
+                if server.poll() is not None:
+                    output = server.stdout.read() if server.stdout else ""
+                    raise AssertionError(f"test server exited early:\n{output}")
+                try:
+                    if urllib.request.urlopen(f"{url}/health/ready", timeout=0.2).status == 200:
+                        break
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                raise AssertionError("test server did not become ready")
+
+            with sync_playwright() as playwright:
+                browser = (
+                    playwright.chromium.launch(
+                        executable_path="/usr/bin/google-chrome", headless=True
+                    )
+                    if os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local"
+                    else playwright.webkit.launch(headless=True)
+                )
+                page = browser.new_page()
+                page.goto(f"{url}/drives/new")
+                page.locator('[name="start_fold"]').evaluate("element => element.value = '0'")
+                page.locator('[name="end_fold"]').evaluate("element => element.value = '0'")
+                page.locator('[name="started_at_local"]').fill("2026-11-01T01:00")
+                page.locator('[name="ended_at_local"]').fill("2026-11-01T01:30")
+                page.get_by_role("button", name="Save drive").click()
+                page.get_by_role("heading", name="Drive details").wait_for()
+
+                page.goto(f"{url}/drives/new")
+                page.locator('[name="start_fold"]').evaluate("element => element.value = '1'")
+                page.locator('[name="end_fold"]').evaluate("element => element.value = '1'")
+                page.locator('[name="started_at_local"]').fill("2026-11-01T01:00")
+                page.locator('[name="ended_at_local"]').fill("2026-11-01T01:30")
+                assert page.locator("[data-overlap-warning]").is_hidden()
+                browser.close()
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+
+
+@pytest.mark.browser
 def test_mobile_webkit_live_drive_recovery() -> None:
     port = _available_port()
     with tempfile.TemporaryDirectory() as temporary:

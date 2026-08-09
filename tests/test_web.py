@@ -203,6 +203,8 @@ class WebTests(unittest.TestCase):
                 self.assertIn(">2%</text>", dashboard.text)
                 self.assertNotIn("1.7%", dashboard.text)
                 self.assertNotIn("data-drive-saved-banner", dashboard.text)
+                self.assertIn('href="/drives/new">Add drive</a>', dashboard.text)
+                self.assertNotIn("Add drive manually", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
@@ -210,7 +212,10 @@ class WebTests(unittest.TestCase):
                 self.assertIn('aria-label="Duration hours"', manual_form.text)
                 self.assertNotIn("data-precise-start=", manual_form.text)
                 self.assertNotIn("data-minimum-duration-seconds", manual_form.text)
-                self.assertNotIn("data-cancel-form", manual_form.text)
+                self.assertIn(
+                    'href="/" data-cancel-form="drive-form">Cancel</a>',
+                    manual_form.text,
+                )
                 self.assertNotIn("Delete drive", manual_form.text)
                 edit_form = await client.get(f"{response.headers['location']}/edit")
                 self.assertIn("data-time-editor", edit_form.text)
@@ -269,6 +274,145 @@ class WebTests(unittest.TestCase):
                 csv_export = await client.get("/csv/export")
                 self.assertEqual(csv_export.status_code, 200)
                 self.assertIn("text/csv", csv_export.headers["content-type"])
+
+        self.run_async(scenario)
+
+    def test_add_drive_has_no_driver_prompt_and_supports_prefill_from_prior_drive(
+        self,
+    ) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                new_form = await client.get("/drives/new")
+                self.assertNotIn("<label>Driver", new_form.text)
+                self.assertIn(
+                    '<input type="hidden" name="driver_name" value="Daniel Ahern">',
+                    new_form.text,
+                )
+
+                first = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:00",
+                        "ended_at_local": "2026-07-20T12:30",
+                        "road_type": "highway",
+                        "weather": "clear",
+                        "end_location": "Home",
+                    },
+                )
+                self.assertEqual(first.status_code, 303)
+                first_id = first.headers["location"].rsplit("/", 1)[-1]
+
+                detail = await client.get(first.headers["location"])
+                self.assertIn(f'href="/drives/new?from={first_id}"', detail.text)
+                self.assertIn("Add another drive", detail.text)
+
+                edit_form = await client.get(f"{first.headers['location']}/edit")
+                self.assertNotIn("<label>Driver", edit_form.text)
+
+                prefilled = await client.get(f"/drives/new?from={first_id}")
+                self.assertEqual(prefilled.status_code, 200)
+                self.assertIn('value="2026-07-20T12:30"', prefilled.text)
+                self.assertIn('value="2026-07-20T13:00"', prefilled.text)
+                self.assertIn('value="Sean Ahern"', prefilled.text)
+                self.assertIn('value="Home"', prefilled.text)
+                self.assertIn(
+                    'name="road_type" value="highway" checked',
+                    prefilled.text,
+                )
+                self.assertIn("clear", prefilled.text)
+                self.assertIn("data-existing-intervals=", prefilled.text)
+                # Existing intervals are embedded as UTC instants so browser
+                # overlap checks stay unambiguous across a DST fallback.
+                self.assertIn("2026-07-20T16:00:00Z", prefilled.text)
+
+                unknown_from = await client.get("/drives/new?from=does-not-exist")
+                self.assertEqual(unknown_from.status_code, 200)
+                self.assertIn('value="Sean Ahern"', unknown_from.text)
+                self.assertNotIn('value="Home"', unknown_from.text)
+
+                overlapping = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:15",
+                        "ended_at_local": "2026-07-20T12:45",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(overlapping.status_code, 303)
+                second_id = overlapping.headers["location"].rsplit("/", 1)[-1]
+
+                edit_second = await client.get(f"/drives/{second_id}/edit")
+                intervals_match = re.search(r"data-existing-intervals='([^']*)'", edit_second.text)
+                self.assertIsNotNone(intervals_match)
+                intervals_json = intervals_match.group(1)  # type: ignore[union-attr]
+                self.assertIn("2026-07-20T16:00:00Z", intervals_json)
+                self.assertNotIn("2026-07-20T16:15:00Z", intervals_json)
+
+        self.run_async(scenario)
+
+    def test_repeat_entry_preserves_the_second_dst_fallback_hour(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                prior = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-11-01T01:00",
+                        "start_fold": "1",
+                        "ended_at_local": "2026-11-01T01:30",
+                        "end_fold": "1",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(prior.status_code, 303)
+                prior_id = prior.headers["location"].rsplit("/", 1)[-1]
+
+                repeated_form = await client.get(f"/drives/new?from={prior_id}")
+                self.assertIn(
+                    'name="started_at_local" value="2026-11-01T01:30"', repeated_form.text
+                )
+                self.assertIn('name="start_fold" value="1"', repeated_form.text)
+                self.assertIn('name="ended_at_local" value="2026-11-01T02:00"', repeated_form.text)
+                self.assertIn('name="end_fold" value="0"', repeated_form.text)
+
+                repeated = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-11-01T01:30",
+                        "start_fold": "1",
+                        "ended_at_local": "2026-11-01T02:00",
+                        "end_fold": "0",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(repeated.status_code, 303)
+                repeated_edit = await client.get(f"{repeated.headers['location']}/edit")
+                self.assertIn(
+                    'name="started_at_local" value="2026-11-01T01:30"', repeated_edit.text
+                )
+                self.assertIn('name="start_fold" value="1"', repeated_edit.text)
+                self.assertIn('name="ended_at_local" value="2026-11-01T02:00"', repeated_edit.text)
 
         self.run_async(scenario)
 

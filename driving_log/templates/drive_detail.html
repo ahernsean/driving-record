@@ -57,6 +57,7 @@
   {% endif %}
   <div class="actions">
     <a class="button" href="/drives/{{ drive.id }}/edit">Edit drive</a>
+    <a class="button" href="/drives/new?from={{ drive.id }}">Add another drive</a>
     <form method="post" action="/drives/{{ drive.id }}/delete" data-async-submit onsubmit="return confirm('Delete this drive? It remains in audit history.')">
       <input type="hidden" name="request_id" value="{{ '20000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
       <input type="hidden" name="version" value="{{ drive.version }}">

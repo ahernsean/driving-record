@@ -105,6 +105,38 @@
     return new Date(value).getTime();
   }
 
+  function zonedInputMilliseconds(value, timeZone, fold) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+    if (!match) return NaN;
+    const [, year, month, day, hour, minute] = match;
+    const localMilliseconds = Date.UTC(year, Number(month) - 1, day, hour, minute);
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    const candidates = [];
+    for (let offsetMinutes = -14 * 60; offsetMinutes <= 14 * 60; offsetMinutes += 15) {
+      const candidate = localMilliseconds - offsetMinutes * 60000;
+      const parts = Object.fromEntries(
+        formatter.formatToParts(new Date(candidate))
+          .filter(part => part.type !== "literal")
+          .map(part => [part.type, part.value])
+      );
+      if (
+        `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}` === value
+      ) {
+        candidates.push(candidate);
+      }
+    }
+    candidates.sort((left, right) => left - right);
+    return candidates[fold === "1" ? candidates.length - 1 : 0] ?? NaN;
+  }
+
   function formatLocalInput(milliseconds) {
     const value = new Date(milliseconds);
     const pad = number => String(number).padStart(2, "0");
@@ -120,6 +152,19 @@
     const hoursInput = editor.querySelector("[data-duration-hours]");
     const minutesInput = editor.querySelector("[data-duration-minutes]");
     const shortDriveWarning = editor.querySelector("[data-short-drive-warning]");
+    const overlapWarning = editor.querySelector("[data-overlap-warning]");
+    const startFold = editor.querySelector("[data-time-start-fold]");
+    const endFold = editor.querySelector("[data-time-end-fold]");
+    const timeZone = editor.dataset.timeZone;
+    // Existing intervals are canonical UTC instants. Resolve the form's local
+    // fields in the server's timezone too, retaining the selected fold during
+    // the repeated autumn hour instead of depending on the browser's timezone.
+    const existingIntervals = editor.dataset.existingIntervals
+      ? JSON.parse(editor.dataset.existingIntervals).map(interval => ({
+          start: new Date(interval.start).getTime(),
+          end: new Date(interval.end).getTime(),
+        }))
+      : [];
     const minimumSeconds = Number(editor.dataset.minimumDurationSeconds);
     const preciseStart = editor.dataset.preciseStart
       ? new Date(editor.dataset.preciseStart).getTime()
@@ -167,6 +212,26 @@
       }
     };
 
+    const updateOverlapWarning = () => {
+      if (!overlapWarning || !existingIntervals.length) return;
+      const start = zonedInputMilliseconds(startInput.value, timeZone, startFold.value);
+      const end = zonedInputMilliseconds(endInput.value, timeZone, endFold.value);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        overlapWarning.hidden = true;
+        return;
+      }
+      const overlapCount = existingIntervals.filter(
+        interval => start < interval.end && end > interval.start
+      ).length;
+      overlapWarning.hidden = overlapCount === 0;
+      if (overlapCount) {
+        overlapWarning.textContent =
+          overlapCount === 1
+            ? "This drive overlaps another saved drive."
+            : `This drive overlaps ${overlapCount} other saved drives.`;
+      }
+    };
+
     const updateDuration = () => {
       const start = localInputMilliseconds(startInput.value);
       const end = localInputMilliseconds(endInput.value);
@@ -184,6 +249,7 @@
         minutesInput.setCustomValidity("");
       }
       updateShortDriveWarning();
+      updateOverlapWarning();
     };
 
     const updateEnd = () => {
@@ -200,6 +266,7 @@
         endInput.setCustomValidity("");
       }
       updateShortDriveWarning();
+      updateOverlapWarning();
     };
 
     startInput.addEventListener("input", updateDuration);
