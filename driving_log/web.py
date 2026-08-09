@@ -526,11 +526,36 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                         grouped_items.append(display_item(row, "day", "Day"))
                     if int(row["night_minutes"]) and selected_sunlight != "day":
                         grouped_items.append(display_item(row, "night", "Night"))
+            elif group_by == "part_of_day":
+                # A drive can cross dusk or dawn.  Keep its nighttime contribution
+                # separate so the Nighttime group's minutes (and percentage) agree
+                # with the Day / night view rather than counting the whole drive.
+                grouped_items = []
+                for row in drives:
+                    day_minutes = int(row["day_minutes"])
+                    night_minutes = int(row["night_minutes"])
+                    if day_minutes and selected_sunlight != "night":
+                        part = _part_of_day(row["started_at_utc"], row["timezone_name"])
+                        if part == "night":
+                            ended_at = datetime.fromisoformat(
+                                str(row["ended_at_utc"]).replace("Z", "+00:00")
+                            ) - timedelta(microseconds=1)
+                            part = _part_of_day(ended_at, row["timezone_name"])
+                        item = display_item(row, "day", _time_of_day_label(part))
+                        item["time_of_day_part"] = part
+                        grouped_items.append(item)
+                    if night_minutes and selected_sunlight != "day":
+                        item = display_item(row, "night", _time_of_day_label("night"))
+                        item["time_of_day_part"] = "night"
+                        grouped_items.append(item)
             for item in grouped_items:
                 row = cast(sqlite3.Row, item["row"])
                 if group_by == "day_night":
                     key = "day" if cast(int, item["counted_day_minutes"]) else "night"
                     label = key.title()
+                elif group_by == "part_of_day" and "time_of_day_part" in item:
+                    key = cast(str, item["time_of_day_part"])
+                    label = _time_of_day_label(key)
                 else:
                     key, label = _drive_group_key(row, group_by)
                 group = grouped.setdefault(
@@ -578,6 +603,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 )
             else:
                 groups.sort(key=lambda group: str(group["label"]).casefold())
+            total_minutes = totals["minutes"]
+            for group in groups:
+                group["percentage"] = (
+                    round(cast(int, group["minutes"]) / total_minutes * 100) if total_minutes else 0
+                )
         return templates.TemplateResponse(
             request,
             "drives.html",

@@ -508,6 +508,9 @@ class WebTests(unittest.TestCase):
                 self.assertIn("rain", grouped.text)
                 self.assertIn("0h 45m day", grouped.text)
                 self.assertIn("0h 30m night", grouped.text)
+                self.assertIn("71% of total", grouped.text)
+                self.assertIn("29% of total", grouped.text)
+                self.assertNotIn('<details class="drive-group" open>', grouped.text)
 
                 weather_filtered = await client.get("/drives?weather=clear&weather=rain")
                 self.assertIn("3 drives · 1h 45m", weather_filtered.text)
@@ -547,10 +550,38 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertIn("Morning (dawn–12 PM)", time_grouped.text)
                 self.assertIn("Nighttime (dusk–dawn)", time_grouped.text)
-                self.assertIn("2 drives · 1h 00m", time_grouped.text)
+                expected_night_minutes = sum(
+                    int(row["night_minutes"])
+                    for row in records.list_drives()
+                    if int(row["night_minutes"])
+                )
+                self.assertIn(
+                    f"2 drives · {_format_minutes(expected_night_minutes)}", time_grouped.text
+                )
                 self.assertNotIn('<details class="history-controls" open>', time_grouped.text)
                 self.assertIn("Last week", time_grouped.text)
                 self.assertIn("Last year", time_grouped.text)
+
+                # The final drive crosses dusk.  Its Nighttime share must use
+                # only its nighttime contribution, just like Day / night.
+                day_night_percentages = re.findall(
+                    r'<span class="group-label">(Day|Night)</span><small>.*? · (\d+)% of total',
+                    (await client.get("/drives?group_by=day_night")).text,
+                )
+                time_of_day_percentages = re.findall(
+                    r'<span class="group-label">(Nighttime \(dusk–dawn\))</span><small>'
+                    r".*? · (\d+)% of total",
+                    time_grouped.text,
+                )
+                self.assertEqual(
+                    dict(day_night_percentages)["Night"],
+                    dict(time_of_day_percentages)["Nighttime (dusk–dawn)"],
+                )
+                day_time_grouped = await client.get("/drives?group_by=part_of_day&day_night=day")
+                self.assertNotIn(
+                    '<span class="group-label">Nighttime (dusk–dawn)</span>',
+                    day_time_grouped.text,
+                )
 
                 day_minutes = sum(
                     int(row["day_minutes"])
@@ -561,13 +592,10 @@ class WebTests(unittest.TestCase):
                 self.assertIn(f"2 drives · {_format_minutes(day_minutes)}", daytime.text)
                 self.assertIn("counted toward Daytime", daytime.text)
 
-                night_minutes = sum(
-                    int(row["night_minutes"])
-                    for row in records.list_drives()
-                    if int(row["night_minutes"])
-                )
                 nighttime = await client.get("/drives?day_night=night")
-                self.assertIn(f"2 drives · {_format_minutes(night_minutes)}", nighttime.text)
+                self.assertIn(
+                    f"2 drives · {_format_minutes(expected_night_minutes)}", nighttime.text
+                )
                 self.assertIn("counted toward Nighttime", nighttime.text)
 
                 day_night_grouped = await client.get("/drives?group_by=day_night")
