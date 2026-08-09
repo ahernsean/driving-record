@@ -330,10 +330,9 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertIn("clear", prefilled.text)
                 self.assertIn("data-existing-intervals=", prefilled.text)
-                # Existing intervals are embedded as local wall-clock strings
-                # (matching the datetime-local inputs), not UTC, so the
-                # browser can compare them without any timezone conversion.
-                self.assertIn("2026-07-20T12:00", prefilled.text)
+                # Existing intervals are embedded as UTC instants so browser
+                # overlap checks stay unambiguous across a DST fallback.
+                self.assertIn("2026-07-20T16:00:00Z", prefilled.text)
 
                 unknown_from = await client.get("/drives/new?from=does-not-exist")
                 self.assertEqual(unknown_from.status_code, 200)
@@ -357,8 +356,63 @@ class WebTests(unittest.TestCase):
                 intervals_match = re.search(r"data-existing-intervals='([^']*)'", edit_second.text)
                 self.assertIsNotNone(intervals_match)
                 intervals_json = intervals_match.group(1)  # type: ignore[union-attr]
-                self.assertIn("2026-07-20T12:00", intervals_json)
-                self.assertNotIn("2026-07-20T12:15", intervals_json)
+                self.assertIn("2026-07-20T16:00:00Z", intervals_json)
+                self.assertNotIn("2026-07-20T16:15:00Z", intervals_json)
+
+        self.run_async(scenario)
+
+    def test_repeat_entry_preserves_the_second_dst_fallback_hour(self) -> None:
+        async def scenario() -> None:
+            async with (
+                self.app.router.lifespan_context(self.app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                prior = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-11-01T01:00",
+                        "start_fold": "1",
+                        "ended_at_local": "2026-11-01T01:30",
+                        "end_fold": "1",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(prior.status_code, 303)
+                prior_id = prior.headers["location"].rsplit("/", 1)[-1]
+
+                repeated_form = await client.get(f"/drives/new?from={prior_id}")
+                self.assertIn(
+                    'name="started_at_local" value="2026-11-01T01:30"', repeated_form.text
+                )
+                self.assertIn('name="start_fold" value="1"', repeated_form.text)
+                self.assertIn('name="ended_at_local" value="2026-11-01T02:00"', repeated_form.text)
+                self.assertIn('name="end_fold" value="0"', repeated_form.text)
+
+                repeated = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-11-01T01:30",
+                        "start_fold": "1",
+                        "ended_at_local": "2026-11-01T02:00",
+                        "end_fold": "0",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(repeated.status_code, 303)
+                repeated_edit = await client.get(f"{repeated.headers['location']}/edit")
+                self.assertIn(
+                    'name="started_at_local" value="2026-11-01T01:30"', repeated_edit.text
+                )
+                self.assertIn('name="start_fold" value="1"', repeated_edit.text)
+                self.assertIn('name="ended_at_local" value="2026-11-01T02:00"', repeated_edit.text)
 
         self.run_async(scenario)
 
