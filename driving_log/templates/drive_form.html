@@ -25,6 +25,9 @@
       <textarea name="notes" rows="3">{{ drive.notes if drive else '' }}</textarea>
     </label>
     <button class="primary" type="submit">Save drive</button>
+    {% if not drive %}
+      <a class="button" href="/" data-cancel-form="drive-form">Cancel</a>
+    {% endif %}
   </form>
   {% if drive %}
     <div class="actions">

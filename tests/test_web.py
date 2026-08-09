@@ -203,6 +203,8 @@ class WebTests(unittest.TestCase):
                 self.assertIn(">2%</text>", dashboard.text)
                 self.assertNotIn("1.7%", dashboard.text)
                 self.assertNotIn("data-drive-saved-banner", dashboard.text)
+                self.assertIn('href="/drives/new">Add drive</a>', dashboard.text)
+                self.assertNotIn("Add drive manually", dashboard.text)
                 manual_form = await client.get("/drives/new")
                 self.assertNotIn('name="supervisor_dl_number"', manual_form.text)
                 self.assertNotIn('name="supervisor_dl_state"', manual_form.text)
@@ -210,7 +212,10 @@ class WebTests(unittest.TestCase):
                 self.assertIn('aria-label="Duration hours"', manual_form.text)
                 self.assertNotIn("data-precise-start=", manual_form.text)
                 self.assertNotIn("data-minimum-duration-seconds", manual_form.text)
-                self.assertNotIn("data-cancel-form", manual_form.text)
+                self.assertIn(
+                    'href="/" data-cancel-form="drive-form">Cancel</a>',
+                    manual_form.text,
+                )
                 self.assertNotIn("Delete drive", manual_form.text)
                 edit_form = await client.get(f"{response.headers['location']}/edit")
                 self.assertIn("data-time-editor", edit_form.text)
@@ -272,7 +277,7 @@ class WebTests(unittest.TestCase):
 
         self.run_async(scenario)
 
-    def test_manual_entry_has_no_driver_prompt_and_supports_prefill_from_prior_drive(
+    def test_add_drive_has_no_driver_prompt_and_supports_prefill_from_prior_drive(
         self,
     ) -> None:
         async def scenario() -> None:
@@ -308,7 +313,7 @@ class WebTests(unittest.TestCase):
 
                 detail = await client.get(first.headers["location"])
                 self.assertIn(f'href="/drives/new?from={first_id}"', detail.text)
-                self.assertIn("Add another manual drive", detail.text)
+                self.assertIn("Add another drive", detail.text)
 
                 edit_form = await client.get(f"{first.headers['location']}/edit")
                 self.assertNotIn("<label>Driver", edit_form.text)
