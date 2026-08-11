@@ -418,7 +418,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 overages=overages,
                 live=open_drive,
                 saved_drive=saved_drive,
-                supervisor_options=AUTH_SUPERVISORS,
             ),
         )
 

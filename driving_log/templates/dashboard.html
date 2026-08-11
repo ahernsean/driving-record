@@ -75,15 +75,6 @@
     {% if not live %}
       <form method="post" action="/live/start" data-async-submit>
         <input type="hidden" name="request_id" value="{{ request.state.request_id if request.state.request_id is defined else '00000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
-        {% if current_user %}
-          <label>Supervising driver
-            <select name="supervisor_name">
-              {% for supervisor in supervisor_options %}
-                <option value="{{ supervisor }}" {{ "selected" if supervisor == current_user }}>{{ supervisor }}</option>
-              {% endfor %}
-            </select>
-          </label>
-        {% endif %}
         <button class="primary" type="submit">Start a drive</button>
       </form>
     {% endif %}
