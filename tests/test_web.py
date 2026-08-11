@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import hashlib
 import io
@@ -12,6 +13,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import anyio
@@ -148,6 +150,54 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(signed_out.status_code, 303)
                 self.assertIn("Max-Age=0", signed_out.headers["set-cookie"])
                 self.assertEqual((await client.get("/")).status_code, 303)
+
+        self.run_async(scenario)
+
+    def test_concurrent_failed_logins_advance_backoff_atomically(self) -> None:
+        settings = Settings(
+            state_dir=self.settings.state_dir,
+            database_path=self.settings.database_path,
+            archive_dir=self.settings.archive_dir,
+            restore_dir=self.settings.restore_dir,
+            host=self.settings.host,
+            port=self.settings.port,
+            public_host=self.settings.public_host,
+            auth_required=True,
+            sean_password_hash="configured",
+            jen_password_hash="configured",
+            session_secret="test-session-secret",
+        )
+        app = create_app(settings)
+        delays: list[int] = []
+
+        async def fake_sleep(delay: float) -> None:
+            delays.append(int(delay))
+            await anyio.sleep(0)
+
+        async def scenario() -> None:
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                with (
+                    patch("driving_log.web.Authenticator.authenticate", return_value=None),
+                    patch("driving_log.web.asyncio.sleep", new=fake_sleep),
+                ):
+                    responses = await asyncio.gather(
+                        *(
+                            client.post(
+                                "/login",
+                                data={"account": "sean", "password": "wrong", "next": "/"},
+                            )
+                            for _ in range(4)
+                        )
+                    )
+                self.assertEqual([response.status_code for response in responses], [401] * 4)
+                self.assertEqual(sorted(delays), [1, 2, 4, 8])
 
         self.run_async(scenario)
 

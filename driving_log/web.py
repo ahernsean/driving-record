@@ -263,6 +263,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         settings.sean_password_hash, settings.jen_password_hash, settings.session_secret
     )
     login_failures: dict[tuple[str, str], tuple[int, float]] = {}
+    login_failures_lock = asyncio.Lock()
 
     @app.middleware("http")
     async def authenticate_and_prevent_stale_html(
@@ -340,16 +341,18 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         next_path = safe_next(str(form.get("next", "")))
         if not user:
             key = (client_host, account)
-            failures, _ = login_failures.get(key, (0, 0.0))
+            async with login_failures_lock:
+                failures, _ = login_failures.get(key, (0, 0.0))
+                login_failures[key] = (failures + 1, time.monotonic())
             await asyncio.sleep(min(2 ** min(failures, 3), 8))
-            login_failures[key] = (failures + 1, time.monotonic())
             return templates.TemplateResponse(
                 request,
                 "login.html",
                 common(request, title="Sign in", next_path=next_path, login_error=True),
                 status_code=401,
             )
-        login_failures.pop((client_host, account), None)
+        async with login_failures_lock:
+            login_failures.pop((client_host, account), None)
         response = redirect(next_path)
         response.set_cookie(
             COOKIE_NAME,
