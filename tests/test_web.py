@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import hashlib
 import io
@@ -12,6 +13,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import anyio
@@ -19,6 +21,7 @@ import httpx
 from pypdf import PdfReader
 
 from driving_log.app import create_app
+from driving_log.auth import password_hash
 from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.db import utc_now_text
 from driving_log.migrations import LATEST_SCHEMA_VERSION
@@ -49,6 +52,7 @@ class WebTests(unittest.TestCase):
             host="127.0.0.1",
             port=8766,
             public_host="testserver",
+            auth_required=False,
         )
         self.app = create_app(self.settings)
 
@@ -57,6 +61,145 @@ class WebTests(unittest.TestCase):
 
     def run_async(self, function: object) -> None:
         anyio.run(function)  # type: ignore[arg-type]
+
+    def test_login_defaults_and_limits_supervisor_choices(self) -> None:
+        settings = Settings(
+            state_dir=self.settings.state_dir,
+            database_path=self.settings.database_path,
+            archive_dir=self.settings.archive_dir,
+            restore_dir=self.settings.restore_dir,
+            host=self.settings.host,
+            port=self.settings.port,
+            public_host=self.settings.public_host,
+            auth_required=True,
+            sean_password_hash=password_hash("sean-password"),
+            jen_password_hash=password_hash("jen-password"),
+            session_secret="test-session-secret",
+        )
+        app = create_app(settings)
+
+        async def scenario() -> None:
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                protected = await client.get("/drives")
+                self.assertEqual(protected.status_code, 303)
+                self.assertEqual(protected.headers["location"], "/login?next=/drives")
+                failed = await client.post(
+                    "/login", data={"account": "jen", "password": "wrong", "next": "/"}
+                )
+                self.assertEqual(failed.status_code, 401)
+                unsafe_next = await client.post(
+                    "/login",
+                    data={
+                        "account": "jen",
+                        "password": "jen-password",
+                        "next": "/\\evil.example.com",
+                    },
+                )
+                self.assertEqual(unsafe_next.status_code, 303)
+                self.assertEqual(unsafe_next.headers["location"], "/")
+                signed_in = await client.post(
+                    "/login", data={"account": "jen", "password": "jen-password", "next": "/"}
+                )
+                self.assertEqual(signed_in.status_code, 303)
+                self.assertIn("driving_log_session", signed_in.headers["set-cookie"])
+                dashboard = await client.get("/")
+                self.assertIn("Signed in as Jen Ahern", dashboard.text)
+                self.assertLess(
+                    dashboard.text.index("</main>"), dashboard.text.index("Signed in as Jen Ahern")
+                )
+                new_drive = await client.get("/drives/new")
+                self.assertIn('name="supervisor_name"', new_drive.text)
+                self.assertIn('<option value="Jen Ahern" selected>', new_drive.text)
+                created = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "driver_name": "Daniel Ahern",
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:00",
+                        "ended_at_local": "2026-07-20T12:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(created.status_code, 303)
+                row = (
+                    app.state.database.connect_readonly()
+                    .execute("SELECT supervisor_name FROM drives")
+                    .fetchone()
+                )
+                self.assertEqual(row["supervisor_name"], "Sean Ahern")
+                invalid = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Not a supervising driver",
+                        "started_at_local": "2026-07-21T12:00",
+                        "ended_at_local": "2026-07-21T12:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(invalid.status_code, 400)
+                signed_out = await client.post("/logout")
+                self.assertEqual(signed_out.status_code, 303)
+                self.assertIn("Max-Age=0", signed_out.headers["set-cookie"])
+                self.assertEqual((await client.get("/")).status_code, 303)
+
+        self.run_async(scenario)
+
+    def test_concurrent_failed_logins_advance_backoff_atomically(self) -> None:
+        settings = Settings(
+            state_dir=self.settings.state_dir,
+            database_path=self.settings.database_path,
+            archive_dir=self.settings.archive_dir,
+            restore_dir=self.settings.restore_dir,
+            host=self.settings.host,
+            port=self.settings.port,
+            public_host=self.settings.public_host,
+            auth_required=True,
+            sean_password_hash="configured",
+            jen_password_hash="configured",
+            session_secret="test-session-secret",
+        )
+        app = create_app(settings)
+        delays: list[int] = []
+
+        async def fake_sleep(delay: float) -> None:
+            delays.append(int(delay))
+            await anyio.sleep(0)
+
+        async def scenario() -> None:
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                with (
+                    patch("driving_log.web.Authenticator.authenticate", return_value=None),
+                    patch("driving_log.web.asyncio.sleep", new=fake_sleep),
+                ):
+                    responses = await asyncio.gather(
+                        *(
+                            client.post(
+                                "/login",
+                                data={"account": "sean", "password": "wrong", "next": "/"},
+                            )
+                            for _ in range(4)
+                        )
+                    )
+                self.assertEqual([response.status_code for response in responses], [401] * 4)
+                self.assertEqual(sorted(delays), [1, 2, 4, 8])
+
+        self.run_async(scenario)
 
     def test_dashboard_has_no_login_and_manual_record_flow(self) -> None:
         async def scenario() -> None:
@@ -72,6 +215,8 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(dashboard.status_code, 200)
                 self.assertEqual(dashboard.headers["cache-control"], "no-store")
                 self.assertIn("Start a drive", dashboard.text)
+                self.assertIn('href="/">Dashboard</a>', dashboard.text)
+                self.assertNotIn('href="/archives">Archives</a>', dashboard.text)
                 self.assertNotIn("login", dashboard.text.lower())
                 self.assertRegex(
                     dashboard.text,
@@ -271,6 +416,7 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Verified archive", archives.text)
                 imports = await client.get("/imports")
                 self.assertIn("Imports and exports", imports.text)
+                self.assertIn('href="/archives">Archives</a>', imports.text)
                 csv_export = await client.get("/csv/export")
                 self.assertEqual(csv_export.status_code, 200)
                 self.assertIn("text/csv", csv_export.headers["content-type"])

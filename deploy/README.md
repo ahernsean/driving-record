@@ -1,7 +1,9 @@
 # Rocky deployment
 
-The application listens only on `127.0.0.1:8766`. Tailscale Serve is the
-network authorization boundary; there is deliberately no application login.
+The application listens only on `127.0.0.1:8766`. When it is exposed through
+Tailscale Funnel, its application login is the access boundary. It has two
+accounts: Sean Ahern and Jen Ahern. The account that starts or saves a drive is
+recorded as that drive's supervising driver.
 
 Install the checked-out stack tip:
 
@@ -9,10 +11,24 @@ Install the checked-out stack tip:
 sudo dnf install -y epel-release
 sudo dnf install -y python3.13 python3.13-pip sqlite poppler-utils
 ./driving-log bootstrap
-./driving-log install --public-host HOSTNAME:8443 --public-scheme http
+./driving-log install --public-scheme https
 loginctl enable-linger "$USER"
+```
+
+`install` finds this machine's Tailscale DNS name, creates the git-ignored
+`driving-log-runtime/` directory, copies a legacy home-directory log there if
+one exists, writes the private environment file, and installs/reloads the user
+systemd units. It does not start the service yet.
+
+Before starting, set a password for each account. Each command prompts twice;
+the tool salts and hashes the password directly into the private environment
+file, so nothing needs to be copied or pasted:
+
+```sh
+./driving-log --set-password Sean
+./driving-log --set-password Jen
 ./driving-log start
-tailscale serve --bg --http=8443 http://127.0.0.1:8766
+tailscale funnel --bg --https=8443 http://127.0.0.1:8766
 ```
 
 Re-running `./driving-log install` after an update reloads the units and restarts
@@ -20,14 +36,17 @@ the web service and archive timer when they are already active. This keeps the
 running application schema support in step with migrations performed by
 one-shot commands.
 
-Before changing Serve, save `tailscale serve status --json` and verify the
-existing HTTP port 80 handler still forwards to Wordle on
-`127.0.0.1:8765`. Never use Funnel and never bind this application to a LAN or
-tailnet address.
+Before changing Funnel, save `tailscale serve status --json` and verify the
+existing HTTP port 80 handler still forwards to Wordle on `127.0.0.1:8765`.
+Never bind this application to a LAN or tailnet address. The service refuses to
+start unless both password hashes are configured; the installer creates the
+separate session-signing secret automatically.
 
-The environment file is mode `0600` at
-`~/.config/driving-log/environment`. Mutable state is mode `0700` beneath
-`~/.local/state/driving-log`; the database and archives are mode `0600`.
+The git-ignored `driving-log-runtime/` directory holds the mode-`0600`
+environment file and database, plus mode-`0700` archive and restore-request
+directories. The installer safely copies an existing legacy home-directory
+database and its archives there once; it leaves the original intact as a
+fallback.
 Configure `DRIVING_LOG_EXTERNAL_ARCHIVE_DIR` to protect against loss of the
 Rocky disk.
 

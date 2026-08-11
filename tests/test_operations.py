@@ -14,10 +14,11 @@ from subprocess import CompletedProcess
 from unittest import mock
 
 from driving_log.archive import create_archive, verify_archive
-from driving_log.cli import doctor, main
+from driving_log.cli import doctor, main, tailscale_public_host
 from driving_log.config import Settings
 from driving_log.db import Database
 from driving_log.operations import (
+    _migrate_legacy_runtime,
     apply_retention,
     install_user_units,
     process_restore_request,
@@ -38,6 +39,7 @@ class OperationTests(unittest.TestCase):
             host="127.0.0.1",
             port=8766,
             public_host=public_host,
+            auth_required=False,
         )
 
     def test_replication_is_independently_verified(self) -> None:
@@ -49,6 +51,21 @@ class OperationTests(unittest.TestCase):
             replicated = replicate_archive(archive, root / "external")
             self.assertTrue(verify_archive(replicated)["verified"])
             self.assertEqual(replicated.stat().st_mode & 0o777, 0o600)
+
+    def test_legacy_runtime_copy_keeps_the_original_and_uses_sqlite_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            legacy = root / "legacy"
+            Database(legacy / "driving-log.sqlite3").initialize()
+            (legacy / "archives").mkdir()
+            (legacy / "archives" / "saved.tar.gz").write_bytes(b"archive")
+            runtime = root / "repo" / "driving-log-runtime"
+            runtime.mkdir(parents=True)
+            self.assertTrue(_migrate_legacy_runtime(legacy, runtime))
+            self.assertTrue((legacy / "driving-log.sqlite3").exists())
+            self.assertTrue((runtime / "driving-log.sqlite3").exists())
+            self.assertEqual((runtime / "archives" / "saved.tar.gz").read_bytes(), b"archive")
+            self.assertFalse(_migrate_legacy_runtime(legacy, runtime))
 
     def test_retention_keeps_fourteen_daily_and_eight_weekly(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -100,7 +117,8 @@ class OperationTests(unittest.TestCase):
         readme = (root / "deploy/README.md").read_text()
         self.assertIn("127.0.0.1:8766", readme)
         self.assertIn("127.0.0.1:8765", readme)
-        self.assertNotIn("tailscale funnel", readme.lower())
+        self.assertIn("tailscale funnel", readme.lower())
+        self.assertIn("--set-password Sean", readme)
 
     def test_no_private_seed_is_tracked_by_ignore_contract(self) -> None:
         ignore = (Path(__file__).parent.parent / ".gitignore").read_text()
@@ -108,9 +126,11 @@ class OperationTests(unittest.TestCase):
         self.assertIn("records/log.txt", ignore)
 
     def test_install_writes_private_environment_and_all_units(self) -> None:
-        repo = Path(__file__).parent.parent
+        source_repo = Path(__file__).parent.parent
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
+            repo = home / "repo"
+            shutil.copytree(source_repo / "deploy", repo / "deploy")
             with (
                 mock.patch("driving_log.operations.Path.home", return_value=home),
                 mock.patch("driving_log.operations.run_systemctl") as systemctl,
@@ -125,12 +145,15 @@ class OperationTests(unittest.TestCase):
                     public_host="driving.example.ts.net:8443",
                 )
             environment = Path(result["environment"])
+            self.assertEqual(environment, repo / "driving-log-runtime" / "environment")
             self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
             contents = environment.read_text()
             self.assertIn("DRIVING_LOG_HOST=127.0.0.1", contents)
             self.assertIn("DRIVING_LOG_PORT=8766", contents)
             self.assertIn("DRIVING_LOG_PUBLIC_SCHEME=http", contents)
+            self.assertIn("DRIVING_LOG_AUTH_REQUIRED=1", contents)
             self.assertIn("DRIVING_LOG_OPERATION_SECRET=", contents)
+            self.assertIn("DRIVING_LOG_SESSION_SECRET=", contents)
             self.assertNotIn("DRIVING_LOG_FORM_SECRET=", contents)
             self.assertIn(f"DRIVING_LOG_EXTERNAL_ARCHIVE_DIR={home / 'external'}", contents)
             unit_dir = Path(result["unit_directory"])
@@ -322,6 +345,71 @@ class OperationTests(unittest.TestCase):
                 return_value=Path(temporary) / "result.json",
             ):
                 self.assertEqual(main(["archive", "restore-request", str(uuid.uuid4())]), 0)
+
+    def test_set_password_writes_a_private_hash_to_the_runtime_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            environment = state / "environment"
+            environment.write_text("DRIVING_LOG_SESSION_SECRET=session\n", encoding="utf-8")
+            with (
+                mock.patch.dict("os.environ", {"DRIVING_LOG_STATE_DIR": temporary}, clear=False),
+                mock.patch(
+                    "driving_log.cli.getpass.getpass", side_effect=["new-password", "new-password"]
+                ),
+            ):
+                self.assertEqual(main(["--set-password", "Sean"]), 0)
+            contents = environment.read_text(encoding="utf-8")
+            self.assertIn("DRIVING_LOG_SEAN_PASSWORD_HASH=scrypt$", contents)
+            self.assertNotIn("new-password", contents)
+            self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
+
+    def test_set_password_requires_matching_confirmation_and_runtime_environment(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.dict("os.environ", {"DRIVING_LOG_STATE_DIR": temporary}, clear=False),
+            mock.patch("driving_log.cli.getpass.getpass", side_effect=["first", "second"]),
+            self.assertRaisesRegex(ValueError, "do not match"),
+        ):
+            main(["--set-password", "Jen"])
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.dict("os.environ", {"DRIVING_LOG_STATE_DIR": temporary}, clear=False),
+            mock.patch("driving_log.cli.getpass.getpass", side_effect=["password", "password"]),
+            self.assertRaisesRegex(ValueError, "run driving-log install"),
+        ):
+            main(["--set-password", "Jen"])
+
+    def test_tailscale_public_host_rejects_unusable_status(self) -> None:
+        with (
+            mock.patch(
+                "driving_log.cli.subprocess.run",
+                return_value=CompletedProcess(["tailscale"], 1, "", "unavailable"),
+            ),
+            self.assertRaisesRegex(ValueError, "could not read"),
+        ):
+            tailscale_public_host()
+        with (
+            mock.patch(
+                "driving_log.cli.subprocess.run",
+                return_value=CompletedProcess(["tailscale"], 0, "{}", ""),
+            ),
+            self.assertRaisesRegex(ValueError, "could not find"),
+        ):
+            tailscale_public_host()
+
+    def test_install_uses_the_tailscale_dns_name_when_public_host_is_omitted(self) -> None:
+        status = CompletedProcess(
+            ["tailscale"], 0, '{"Self":{"DNSName":"driving.tailnet.ts.net."}}', ""
+        )
+        with (
+            mock.patch("driving_log.cli.subprocess.run", return_value=status),
+            mock.patch("driving_log.cli.install_user_units", return_value={}) as install,
+        ):
+            self.assertEqual(
+                main(["install", "--public-scheme", "https"]),
+                0,
+            )
+        self.assertEqual(install.call_args.kwargs["public_host"], "driving.tailnet.ts.net:8443")
 
     def test_cli_dispatches_seed_csv_and_archive_variants(self) -> None:
         with (

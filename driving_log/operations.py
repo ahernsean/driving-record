@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import time
 import uuid
@@ -38,11 +39,10 @@ def install_user_units(
     public_scheme: str = "http",
     external_archive_dir: Path | None = None,
 ) -> dict[str, str]:
-    config_dir = Path.home() / ".config" / "driving-log"
     unit_dir = Path.home() / ".config" / "systemd" / "user"
-    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     unit_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    state_dir = Path.home() / ".local" / "state" / "driving-log"
+    state_dir = repo_root / "driving-log-runtime"
+    legacy_state_dir = Path.home() / ".local" / "state" / "driving-log"
     for directory in (
         state_dir,
         state_dir / "archives",
@@ -50,10 +50,15 @@ def install_user_units(
     ):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         directory.chmod(0o700)
-    environment_path = config_dir / "environment"
+    migrated = _migrate_legacy_runtime(legacy_state_dir, state_dir)
+    environment_path = state_dir / "environment"
+    legacy_environment_path = Path.home() / ".config" / "driving-log" / "environment"
     existing: dict[str, str] = {}
-    if environment_path.exists():
-        for line in environment_path.read_text(encoding="utf-8").splitlines():
+    source_environment_path = (
+        environment_path if environment_path.exists() else legacy_environment_path
+    )
+    if source_environment_path.exists():
+        for line in source_environment_path.read_text(encoding="utf-8").splitlines():
             if "=" in line and not line.startswith("#"):
                 key, value = line.split("=", 1)
                 existing[key] = value
@@ -62,13 +67,17 @@ def install_user_units(
         or existing.get("DRIVING_LOG_FORM_SECRET")
         or secrets.token_urlsafe(48)
     )
+    session_secret = existing.get("DRIVING_LOG_SESSION_SECRET") or secrets.token_urlsafe(48)
     environment = {
         **existing,
         "DRIVING_LOG_HOST": "127.0.0.1",
         "DRIVING_LOG_PORT": "8766",
+        "DRIVING_LOG_STATE_DIR": str(state_dir.resolve()),
         "DRIVING_LOG_PUBLIC_HOST": public_host,
         "DRIVING_LOG_PUBLIC_SCHEME": public_scheme,
+        "DRIVING_LOG_AUTH_REQUIRED": "1",
         "DRIVING_LOG_OPERATION_SECRET": secret,
+        "DRIVING_LOG_SESSION_SECRET": session_secret,
     }
     selected_external = (
         str(external_archive_dir.expanduser().resolve())
@@ -97,7 +106,30 @@ def install_user_units(
         "environment": str(environment_path),
         "unit_directory": str(unit_dir),
         "public_host": public_host,
+        "legacy_runtime_migrated": str(migrated).lower(),
     }
+
+
+def _migrate_legacy_runtime(legacy_state_dir: Path, state_dir: Path) -> bool:
+    """Copy an existing default runtime safely before switching to the repo runtime."""
+    legacy_database = legacy_state_dir / "driving-log.sqlite3"
+    database = state_dir / "driving-log.sqlite3"
+    if not legacy_database.exists() or database.exists():
+        return False
+    source = sqlite3.connect(legacy_database)
+    destination = sqlite3.connect(database)
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+    database.chmod(0o600)
+    for directory in ("archives", "restore-requests"):
+        source_dir = legacy_state_dir / directory
+        destination_dir = state_dir / directory
+        if source_dir.exists():
+            shutil.copytree(source_dir, destination_dir, dirs_exist_ok=True)
+    return True
 
 
 def service_snapshot() -> dict[str, object]:

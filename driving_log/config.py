@@ -22,13 +22,17 @@ class Settings:
     public_scheme: str = "http"
     operation_secret: str = "development-only-operation-secret"
     development_allow_non_loopback: bool = False
+    auth_required: bool = True
+    sean_password_hash: str = ""
+    jen_password_hash: str = ""
+    session_secret: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
         state = Path(
             os.environ.get(
                 "DRIVING_LOG_STATE_DIR",
-                str(Path.home() / ".local" / "state" / "driving-log"),
+                str(Path(__file__).resolve().parent.parent / "driving-log-runtime"),
             )
         ).expanduser()
         host = os.environ.get("DRIVING_LOG_HOST", "127.0.0.1")
@@ -40,6 +44,7 @@ class Settings:
             )
         public_host = os.environ.get("DRIVING_LOG_PUBLIC_HOST", "127.0.0.1:8766")
         public_scheme = os.environ.get("DRIVING_LOG_PUBLIC_SCHEME", "http")
+        auth_required_text = os.environ.get("DRIVING_LOG_AUTH_REQUIRED")
         if public_scheme not in {"http", "https"}:
             raise ValueError("DRIVING_LOG_PUBLIC_SCHEME must be http or https")
         return cls(
@@ -60,7 +65,24 @@ class Settings:
                 "development-only-operation-secret",
             ),
             development_allow_non_loopback=development_override,
+            auth_required=(
+                auth_required_text != "0"
+                if auth_required_text is not None
+                else not public_host.startswith(("127.0.0.1", "localhost", "testserver"))
+            ),
+            sean_password_hash=os.environ.get("DRIVING_LOG_SEAN_PASSWORD_HASH", ""),
+            jen_password_hash=os.environ.get("DRIVING_LOG_JEN_PASSWORD_HASH", ""),
+            session_secret=os.environ.get("DRIVING_LOG_SESSION_SECRET", ""),
         )
+
+    def validate_authentication(self) -> None:
+        if self.auth_required and not all(
+            (self.sean_password_hash, self.jen_password_hash, self.session_secret)
+        ):
+            raise ValueError(
+                "authentication is required; configure DRIVING_LOG_SEAN_PASSWORD_HASH, "
+                "DRIVING_LOG_JEN_PASSWORD_HASH, and DRIVING_LOG_SESSION_SECRET"
+            )
 
     def ensure_directories(self) -> None:
         for path in (self.state_dir, self.archive_dir, self.restore_dir):

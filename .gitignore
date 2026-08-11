@@ -9,6 +9,7 @@ htmlcov/
 playwright-report/
 test-results/
 .env
+/driving-log-runtime/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm

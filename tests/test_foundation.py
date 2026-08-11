@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import sqlite3
 import tempfile
@@ -13,6 +15,7 @@ import anyio
 import httpx
 
 from driving_log.app import create_app
+from driving_log.auth import Authenticator, _encode, password_hash, verify_password
 from driving_log.cli import doctor, main
 from driving_log.config import Settings
 from driving_log.db import BUSY_TIMEOUT_MS, Database, MigrationMismatchError, SchemaTooNewError
@@ -37,6 +40,29 @@ class DatabaseTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_password_hashes_and_signed_sessions_reject_invalid_values(self) -> None:
+        encoded_password = password_hash("password")
+        self.assertTrue(verify_password("password", encoded_password))
+        self.assertFalse(verify_password("password", "unknown$1$2$3$x$y"))
+        self.assertFalse(verify_password("password", "not-a-password-hash"))
+        with self.assertRaisesRegex(ValueError, "empty"):
+            password_hash("")
+        authenticator = Authenticator(encoded_password, encoded_password, "session-secret")
+        token = authenticator.make_session("Sean Ahern")
+        self.assertEqual(authenticator.session_user(token), "Sean Ahern")
+        rotated = Authenticator(password_hash("rotated"), encoded_password, "session-secret")
+        self.assertIsNone(rotated.session_user(token))
+        self.assertIsNone(authenticator.session_user(f"{token}changed"))
+
+        def signed(payload: dict[str, object]) -> str:
+            body = _encode(payload)
+            signature = hmac.new(b"session-secret", body.encode(), hashlib.sha256).hexdigest()
+            return f"{body}.{signature}"
+
+        self.assertIsNone(authenticator.session_user(signed({"user": "Sean Ahern"})))
+        self.assertIsNone(authenticator.session_user(signed({"user": "Other", "exp": 9999999999})))
+        self.assertIsNone(authenticator.session_user(signed({"user": "Sean Ahern", "exp": 0})))
 
     def test_initializes_schema_and_production_pragmas(self) -> None:
         database = Database(self.path)
@@ -284,6 +310,7 @@ class ApplicationTests(unittest.TestCase):
                 host="127.0.0.1",
                 port=8766,
                 public_host="testserver",
+                auth_required=False,
             )
             app = create_app(settings)
 
