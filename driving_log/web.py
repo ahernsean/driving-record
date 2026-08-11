@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import sqlite3
+import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
@@ -259,6 +262,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     authenticator = Authenticator(
         settings.sean_password_hash, settings.jen_password_hash, settings.session_secret
     )
+    login_failures: dict[tuple[str, str], tuple[int, float]] = {}
 
     @app.middleware("http")
     async def authenticate_and_prevent_stale_html(
@@ -310,7 +314,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         return value
 
     def safe_next(value: str | None) -> str:
-        return value if value and value.startswith("/") and not value.startswith("//") else "/"
+        if not value or "\\" in value or not value.startswith("/"):
+            return "/"
+        parsed = urlsplit(value)
+        return (
+            value if not parsed.netloc and not parsed.scheme and not value.startswith("//") else "/"
+        )
 
     @app.get("/login", response_class=HTMLResponse)
     async def login_form(request: Request) -> Response:
@@ -325,17 +334,22 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/login")
     async def login(request: Request) -> Response:
         form = await read_form(request)
-        user = authenticator.authenticate(
-            str(form.get("account", "")), str(form.get("password", ""))
-        )
+        account = str(form.get("account", ""))
+        client_host = request.client.host if request.client else "unknown"
+        user = authenticator.authenticate(account, str(form.get("password", "")))
         next_path = safe_next(str(form.get("next", "")))
         if not user:
+            key = (client_host, account)
+            failures, _ = login_failures.get(key, (0, 0.0))
+            await asyncio.sleep(min(2 ** min(failures, 3), 8))
+            login_failures[key] = (failures + 1, time.monotonic())
             return templates.TemplateResponse(
                 request,
                 "login.html",
                 common(request, title="Sign in", next_path=next_path, login_error=True),
                 status_code=401,
             )
+        login_failures.pop((client_host, account), None)
         response = redirect(next_path)
         response.set_cookie(
             COOKIE_NAME,

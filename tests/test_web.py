@@ -92,6 +92,16 @@ class WebTests(unittest.TestCase):
                     "/login", data={"account": "jen", "password": "wrong", "next": "/"}
                 )
                 self.assertEqual(failed.status_code, 401)
+                unsafe_next = await client.post(
+                    "/login",
+                    data={
+                        "account": "jen",
+                        "password": "jen-password",
+                        "next": "/\\evil.example.com",
+                    },
+                )
+                self.assertEqual(unsafe_next.status_code, 303)
+                self.assertEqual(unsafe_next.headers["location"], "/")
                 signed_in = await client.post(
                     "/login", data={"account": "jen", "password": "jen-password", "next": "/"}
                 )

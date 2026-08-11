@@ -11,6 +11,8 @@ from dataclasses import dataclass
 COOKIE_NAME = "driving_log_session"
 SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30
 ACCOUNTS = {"sean": "Sean Ahern", "jen": "Jen Ahern"}
+SCRYPT_N = 2**17
+SCRYPT_MAXMEM = 256 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,7 @@ class Authenticator:
             "exp": int(time.time()) + SESSION_LIFETIME_SECONDS,
             "nonce": secrets.token_urlsafe(16),
             "user": user,
+            "credential": self._credential_fingerprint(user),
         }
         encoded = _encode(payload)
         signature = hmac.new(
@@ -60,19 +63,29 @@ class Authenticator:
             or user not in ACCOUNTS.values()
             or not isinstance(expires_at, int)
             or expires_at < time.time()
+            or payload.get("credential") != self._credential_fingerprint(user)
         ):
             return None
         return user
+
+    def _credential_fingerprint(self, user: str) -> str:
+        password_hash = {
+            "Sean Ahern": self.sean_password_hash,
+            "Jen Ahern": self.jen_password_hash,
+        }[user]
+        return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
 
 
 def password_hash(password: str) -> str:
     if not password:
         raise ValueError("password must not be empty")
     salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
+    digest = hashlib.scrypt(
+        password.encode(), salt=salt, n=SCRYPT_N, r=8, p=1, maxmem=SCRYPT_MAXMEM
+    )
     salt_text = base64.urlsafe_b64encode(salt).decode()
     digest_text = base64.urlsafe_b64encode(digest).decode()
-    return f"scrypt$16384$8$1${salt_text}${digest_text}"
+    return f"scrypt${SCRYPT_N}$8$1${salt_text}${digest_text}"
 
 
 def verify_password(password: str, encoded: str) -> bool:
@@ -89,6 +102,7 @@ def verify_password(password: str, encoded: str) -> bool:
             r=int(r_text),
             p=int(p_text),
             dklen=len(expected),
+            maxmem=SCRYPT_MAXMEM,
         )
     except (ValueError, TypeError):
         return False

@@ -51,6 +51,8 @@ class DatabaseTests(unittest.TestCase):
         authenticator = Authenticator(encoded_password, encoded_password, "session-secret")
         token = authenticator.make_session("Sean Ahern")
         self.assertEqual(authenticator.session_user(token), "Sean Ahern")
+        rotated = Authenticator(password_hash("rotated"), encoded_password, "session-secret")
+        self.assertIsNone(rotated.session_user(token))
         self.assertIsNone(authenticator.session_user(f"{token}changed"))
 
         def signed(payload: dict[str, object]) -> str:
