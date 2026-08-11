@@ -35,7 +35,13 @@
       <label>End location<input name="end_location" placeholder="For example, Apex Friendship High School"></label>
       <label>Notes<textarea name="notes" rows="3"></textarea></label>
       {% if current_user %}
-        <p>Supervising driver: <strong>{{ current_user }}</strong></p>
+        <label>Supervising driver
+          <select name="supervisor_name">
+            {% for supervisor in supervisor_options %}
+              <option value="{{ supervisor }}" {{ "selected" if supervisor == live.supervisor_name }}>{{ supervisor }}</option>
+            {% endfor %}
+          </select>
+        </label>
       {% else %}
         <label>Supervisor<input name="supervisor_name" value="{{ live.supervisor_name or 'Sean Ahern' }}"></label>
       {% endif %}

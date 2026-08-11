@@ -60,7 +60,7 @@ class WebTests(unittest.TestCase):
     def run_async(self, function: object) -> None:
         anyio.run(function)  # type: ignore[arg-type]
 
-    def test_login_protects_records_and_assigns_the_signed_in_supervisor(self) -> None:
+    def test_login_defaults_and_limits_supervisor_choices(self) -> None:
         settings = Settings(
             state_dir=self.settings.state_dir,
             database_path=self.settings.database_path,
@@ -102,6 +102,9 @@ class WebTests(unittest.TestCase):
                 self.assertLess(
                     dashboard.text.index("</main>"), dashboard.text.index("Signed in as Jen Ahern")
                 )
+                new_drive = await client.get("/drives/new")
+                self.assertIn('name="supervisor_name"', new_drive.text)
+                self.assertIn('<option value="Jen Ahern" selected>', new_drive.text)
                 created = await client.post(
                     "/drives",
                     data={
@@ -119,7 +122,18 @@ class WebTests(unittest.TestCase):
                     .execute("SELECT supervisor_name FROM drives")
                     .fetchone()
                 )
-                self.assertEqual(row["supervisor_name"], "Jen Ahern")
+                self.assertEqual(row["supervisor_name"], "Sean Ahern")
+                invalid = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "supervisor_name": "Not a supervising driver",
+                        "started_at_local": "2026-07-21T12:00",
+                        "ended_at_local": "2026-07-21T12:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(invalid.status_code, 400)
                 signed_out = await client.post("/logout")
                 self.assertEqual(signed_out.status_code, 303)
                 self.assertIn("Max-Age=0", signed_out.headers["set-cookie"])

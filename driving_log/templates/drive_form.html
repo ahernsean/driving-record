@@ -7,7 +7,14 @@
     <input type="hidden" name="driver_name" value="{{ drive.driver_name if drive else 'Daniel Ahern' }}">
     {% include "_time_editor.html" %}
     {% if current_user %}
-      <p>Supervising driver: <strong>{{ drive.supervisor_name if drive else current_user }}</strong></p>
+      {% set selected_supervisor = drive.supervisor_name if drive else current_user %}
+      <label>Supervising driver
+        <select name="supervisor_name">
+          {% for supervisor in supervisor_options %}
+            <option value="{{ supervisor }}" {{ "selected" if supervisor == selected_supervisor }}>{{ supervisor }}</option>
+          {% endfor %}
+        </select>
+      </label>
     {% else %}
       <label>Supervising driver
         <input name="supervisor_name" value="{{ drive.supervisor_name if drive and drive.supervisor_name else (prefill.supervisor_name if prefill else 'Sean Ahern') }}">

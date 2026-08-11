@@ -15,7 +15,7 @@ from starlette.datastructures import FormData, UploadFile
 from starlette.middleware.base import RequestResponseEndpoint
 
 from driving_log.archive import ArchiveSchemaTooNewError, create_archive
-from driving_log.auth import COOKIE_NAME, SESSION_LIFETIME_SECONDS, Authenticator
+from driving_log.auth import ACCOUNTS, COOKIE_NAME, SESSION_LIFETIME_SECONDS, Authenticator
 from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
@@ -106,6 +106,7 @@ GROUP_BY_OPTIONS = (
     ("weather", "Weather"),
     ("duration", "Duration"),
 )
+AUTH_SUPERVISORS = tuple(ACCOUNTS.values())
 
 
 def _part_of_day(value: str | datetime, timezone_name: str) -> str:
@@ -300,6 +301,14 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     def wants_json(request: Request) -> bool:
         return "application/json" in request.headers.get("accept", "")
 
+    def selected_supervisor(
+        request: Request, form: FormData, default: str | None = None
+    ) -> str | None:
+        value = str(form.get("supervisor_name", default or _actor(request) or "")) or None
+        if settings.auth_required and value not in AUTH_SUPERVISORS:
+            raise ValueError("Choose Sean Ahern or Jen Ahern as the supervising driver")
+        return value
+
     def safe_next(value: str | None) -> str:
         return value if value and value.startswith("/") and not value.startswith("//") else "/"
 
@@ -409,6 +418,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 overages=overages,
                 live=open_drive,
                 saved_drive=saved_drive,
+                supervisor_options=AUTH_SUPERVISORS,
             ),
         )
 
@@ -785,6 +795,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 end_fold=_local_fold(ended),
                 time_zone=ZONE.key,
                 action="/drives",
+                supervisor_options=AUTH_SUPERVISORS,
                 other_intervals=other_intervals(None),
                 **_duration_parts(30),
             ),
@@ -796,11 +807,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         drive = records.create(
             DriveInput(
                 driver_name=str(form.get("driver_name", "Daniel Ahern")),
-                supervisor_name=(
-                    _actor(request)
-                    if settings.auth_required
-                    else str(form.get("supervisor_name", "")) or None
-                ),
+                supervisor_name=selected_supervisor(request, form),
                 supervisor_dl_number=None,
                 supervisor_dl_state=None,
                 started_at_utc=_parse_local(
@@ -849,6 +856,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 end_fold=_local_fold(drive["ended_at_utc"]),
                 time_zone=ZONE.key,
                 action=f"/drives/{drive_id}/edit",
+                supervisor_options=AUTH_SUPERVISORS,
                 other_intervals=other_intervals(drive_id),
                 **_duration_parts(int(drive["duration_minutes"])),
             ),
@@ -872,10 +880,8 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         )
         value = DriveInput(
             driver_name=str(form.get("driver_name", current["driver_name"])),
-            supervisor_name=(
-                current["supervisor_name"]
-                if settings.auth_required
-                else str(form.get("supervisor_name", "")) or None
+            supervisor_name=selected_supervisor(
+                request, form, str(current["supervisor_name"] or "")
             ),
             supervisor_dl_number=current["supervisor_dl_number"],
             supervisor_dl_state=current["supervisor_dl_state"],
@@ -934,7 +940,13 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         return templates.TemplateResponse(
             request,
             "live.html",
-            common(request, title="Live drive", live=open_drive, **time_values),
+            common(
+                request,
+                title="Live drive",
+                live=open_drive,
+                supervisor_options=AUTH_SUPERVISORS,
+                **time_values,
+            ),
         )
 
     @app.get("/live/state")
@@ -948,11 +960,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         form = await read_form(request)
         live.start(
             request_id=str(form["request_id"]),
-            supervisor_name=(
-                _actor(request)
-                if settings.auth_required
-                else str(form.get("supervisor_name", "")) or None
-            ),
+            supervisor_name=selected_supervisor(request, form),
             actor_identity=_actor(request),
         )
         return redirect("/live")
@@ -1012,7 +1020,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             weather=str(form.get("weather", "")),
             notes=str(form.get("notes", "")),
             end_location=str(form.get("end_location", "")),
-            supervisor_name=_actor(request),
+            supervisor_name=selected_supervisor(
+                request, form, str(current["supervisor_name"] or "")
+            ),
             corrected_start_utc=corrected_start,
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),

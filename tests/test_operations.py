@@ -14,7 +14,7 @@ from subprocess import CompletedProcess
 from unittest import mock
 
 from driving_log.archive import create_archive, verify_archive
-from driving_log.cli import doctor, main
+from driving_log.cli import doctor, main, tailscale_public_host
 from driving_log.config import Settings
 from driving_log.db import Database
 from driving_log.operations import (
@@ -362,6 +362,40 @@ class OperationTests(unittest.TestCase):
             self.assertIn("DRIVING_LOG_SEAN_PASSWORD_HASH=scrypt$", contents)
             self.assertNotIn("new-password", contents)
             self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
+
+    def test_set_password_requires_matching_confirmation_and_runtime_environment(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.dict("os.environ", {"DRIVING_LOG_STATE_DIR": temporary}, clear=False),
+            mock.patch("driving_log.cli.getpass.getpass", side_effect=["first", "second"]),
+            self.assertRaisesRegex(ValueError, "do not match"),
+        ):
+            main(["--set-password", "Jen"])
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.dict("os.environ", {"DRIVING_LOG_STATE_DIR": temporary}, clear=False),
+            mock.patch("driving_log.cli.getpass.getpass", side_effect=["password", "password"]),
+            self.assertRaisesRegex(ValueError, "run driving-log install"),
+        ):
+            main(["--set-password", "Jen"])
+
+    def test_tailscale_public_host_rejects_unusable_status(self) -> None:
+        with (
+            mock.patch(
+                "driving_log.cli.subprocess.run",
+                return_value=CompletedProcess(["tailscale"], 1, "", "unavailable"),
+            ),
+            self.assertRaisesRegex(ValueError, "could not read"),
+        ):
+            tailscale_public_host()
+        with (
+            mock.patch(
+                "driving_log.cli.subprocess.run",
+                return_value=CompletedProcess(["tailscale"], 0, "{}", ""),
+            ),
+            self.assertRaisesRegex(ValueError, "could not find"),
+        ):
+            tailscale_public_host()
 
     def test_install_uses_the_tailscale_dns_name_when_public_host_is_omitted(self) -> None:
         status = CompletedProcess(
