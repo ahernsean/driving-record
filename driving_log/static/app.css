@@ -36,6 +36,13 @@ header a { color: var(--text); text-decoration: none; }
 .brand { font-weight: 800; }
 nav { display: flex; gap: 1rem; font-size: .88rem; }
 main { width: min(100%, 42rem); margin: auto; padding: 1rem 1rem max(2rem, env(safe-area-inset-bottom)); }
+.account-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  width: min(100%, 42rem); margin: 0 auto; padding: 1rem max(1rem, env(safe-area-inset-right))
+  max(1rem, env(safe-area-inset-bottom)); color: var(--muted); font-size: .88rem;
+}
+.account-footer form { margin: 0; }
+.account-footer button { width: auto; min-height: 2.5rem; padding: .45rem .75rem; }
 h1 { font-size: 1.75rem; margin: .4rem 0 1.2rem; }
 h2 { font-size: 1.2rem; }
 .progress-card {

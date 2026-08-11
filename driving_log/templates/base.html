@@ -20,10 +20,13 @@
       <a href="/drives">History</a>
       <a href="/imports">Data</a>
     </nav>
-    {% if current_user %}
-      <form method="post" action="/logout" class="logout"><span>Signed in as {{ current_user }}</span><button type="submit">Sign out</button></form>
-    {% endif %}
   </header>
   <main>{% block content %}{% endblock %}</main>
+  {% if current_user %}
+    <footer class="account-footer">
+      <span>Signed in as {{ current_user }}</span>
+      <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+    </footer>
+  {% endif %}
 </body>
 </html>

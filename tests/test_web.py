@@ -97,6 +97,11 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertEqual(signed_in.status_code, 303)
                 self.assertIn("driving_log_session", signed_in.headers["set-cookie"])
+                dashboard = await client.get("/")
+                self.assertIn("Signed in as Jen Ahern", dashboard.text)
+                self.assertLess(
+                    dashboard.text.index("</main>"), dashboard.text.index("Signed in as Jen Ahern")
+                )
                 created = await client.post(
                     "/drives",
                     data={
