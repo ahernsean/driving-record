@@ -20,6 +20,9 @@
       <a href="/imports">Data</a>
       <a href="/archives">Archives</a>
     </nav>
+    {% if current_user %}
+      <form method="post" action="/logout" class="logout"><span>Signed in as {{ current_user }}</span><button type="submit">Sign out</button></form>
+    {% endif %}
   </header>
   <main>{% block content %}{% endblock %}</main>
 </body>

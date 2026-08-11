@@ -19,6 +19,7 @@ import httpx
 from pypdf import PdfReader
 
 from driving_log.app import create_app
+from driving_log.auth import password_hash
 from driving_log.config import DEFAULT_TIMEZONE, Settings
 from driving_log.db import utc_now_text
 from driving_log.migrations import LATEST_SCHEMA_VERSION
@@ -49,6 +50,7 @@ class WebTests(unittest.TestCase):
             host="127.0.0.1",
             port=8766,
             public_host="testserver",
+            auth_required=False,
         )
         self.app = create_app(self.settings)
 
@@ -57,6 +59,68 @@ class WebTests(unittest.TestCase):
 
     def run_async(self, function: object) -> None:
         anyio.run(function)  # type: ignore[arg-type]
+
+    def test_login_protects_records_and_assigns_the_signed_in_supervisor(self) -> None:
+        settings = Settings(
+            state_dir=self.settings.state_dir,
+            database_path=self.settings.database_path,
+            archive_dir=self.settings.archive_dir,
+            restore_dir=self.settings.restore_dir,
+            host=self.settings.host,
+            port=self.settings.port,
+            public_host=self.settings.public_host,
+            auth_required=True,
+            sean_password_hash=password_hash("sean-password"),
+            jen_password_hash=password_hash("jen-password"),
+            session_secret="test-session-secret",
+        )
+        app = create_app(settings)
+
+        async def scenario() -> None:
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as client,
+            ):
+                protected = await client.get("/drives")
+                self.assertEqual(protected.status_code, 303)
+                self.assertEqual(protected.headers["location"], "/login?next=/drives")
+                failed = await client.post(
+                    "/login", data={"account": "jen", "password": "wrong", "next": "/"}
+                )
+                self.assertEqual(failed.status_code, 401)
+                signed_in = await client.post(
+                    "/login", data={"account": "jen", "password": "jen-password", "next": "/"}
+                )
+                self.assertEqual(signed_in.status_code, 303)
+                self.assertIn("driving_log_session", signed_in.headers["set-cookie"])
+                created = await client.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "driver_name": "Daniel Ahern",
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:00",
+                        "ended_at_local": "2026-07-20T12:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(created.status_code, 303)
+                row = (
+                    app.state.database.connect_readonly()
+                    .execute("SELECT supervisor_name FROM drives")
+                    .fetchone()
+                )
+                self.assertEqual(row["supervisor_name"], "Jen Ahern")
+                signed_out = await client.post("/logout")
+                self.assertEqual(signed_out.status_code, 303)
+                self.assertIn("Max-Age=0", signed_out.headers["set-cookie"])
+                self.assertEqual((await client.get("/")).status_code, 303)
+
+        self.run_async(scenario)
 
     def test_dashboard_has_no_login_and_manual_record_flow(self) -> None:
         async def scenario() -> None:

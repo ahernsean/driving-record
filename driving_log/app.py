@@ -21,6 +21,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         configure_logging()
         selected.ensure_directories()
+        selected.validate_authentication()
         with application_lock(selected.state_dir, exclusive=False):
             # Liveness remains available while readiness explains the safe refusal.
             with suppress(Exception):

@@ -5,11 +5,11 @@ Conflicts=driving-log-web.service
 [Service]
 Type=oneshot
 WorkingDirectory=%h/work/driving-record
-EnvironmentFile=-%h/.config/driving-log/environment
+EnvironmentFile=-%h/work/driving-record/driving-log-runtime/environment
 ExecStart=%h/work/driving-record/driving-log archive restore-request %i
 ExecStopPost=systemctl --user start driving-log-web.service
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=%h/.local/state/driving-log
+ReadWritePaths=%h/work/driving-record/driving-log-runtime
 UMask=0077

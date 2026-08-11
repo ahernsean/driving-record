@@ -15,6 +15,7 @@ from starlette.datastructures import FormData, UploadFile
 from starlette.middleware.base import RequestResponseEndpoint
 
 from driving_log.archive import ArchiveSchemaTooNewError, create_archive
+from driving_log.auth import COOKIE_NAME, SESSION_LIFETIME_SECONDS, Authenticator
 from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
@@ -240,7 +241,7 @@ def _theme_context(now: datetime | None = None) -> dict[str, object]:
 
 
 def _actor(request: Request) -> str | None:
-    return request.headers.get("Tailscale-User-Login")
+    return cast(str | None, getattr(request.state, "user", None))
 
 
 def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
@@ -254,9 +255,25 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     live = LiveDriveService(database)
     profiles = SupervisorProfileService(database)
     dmv = DmvExportService(database)
+    authenticator = Authenticator(
+        settings.sean_password_hash, settings.jen_password_hash, settings.session_secret
+    )
 
     @app.middleware("http")
-    async def prevent_stale_html(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def authenticate_and_prevent_stale_html(
+        request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        if settings.auth_required:
+            request.state.user = authenticator.session_user(request.cookies.get(COOKIE_NAME))
+            public_path = request.url.path in {"/login", "/health/live", "/health/ready"}
+            requires_login = not public_path and not request.url.path.startswith("/static/")
+            if requires_login and not request.state.user:
+                if "application/json" in request.headers.get("accept", ""):
+                    return JSONResponse({"detail": "authentication required"}, status_code=401)
+                next_path = request.url.path
+                if request.url.query:
+                    next_path += f"?{request.url.query}"
+                return RedirectResponse(f"/login?next={next_path}", status_code=303)
         response = await call_next(request)
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Cache-Control"] = "no-store"
@@ -269,6 +286,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             "format_local_datetime": _format_local_datetime,
             "format_local_date": _format_local_date,
             "asset_version": asset_version,
+            "current_user": _actor(request),
             **_theme_context(),
             **values,
         }
@@ -281,6 +299,51 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
 
     def wants_json(request: Request) -> bool:
         return "application/json" in request.headers.get("accept", "")
+
+    def safe_next(value: str | None) -> str:
+        return value if value and value.startswith("/") and not value.startswith("//") else "/"
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_form(request: Request) -> Response:
+        if _actor(request):
+            return redirect(safe_next(request.query_params.get("next")))
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            common(request, title="Sign in", next_path=safe_next(request.query_params.get("next"))),
+        )
+
+    @app.post("/login")
+    async def login(request: Request) -> Response:
+        form = await read_form(request)
+        user = authenticator.authenticate(
+            str(form.get("account", "")), str(form.get("password", ""))
+        )
+        next_path = safe_next(str(form.get("next", "")))
+        if not user:
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                common(request, title="Sign in", next_path=next_path, login_error=True),
+                status_code=401,
+            )
+        response = redirect(next_path)
+        response.set_cookie(
+            COOKIE_NAME,
+            authenticator.make_session(user),
+            max_age=SESSION_LIFETIME_SECONDS,
+            httponly=True,
+            secure=settings.public_scheme == "https",
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.post("/logout")
+    async def logout() -> RedirectResponse:
+        response = redirect("/login")
+        response.delete_cookie(COOKIE_NAME, path="/")
+        return response
 
     @app.exception_handler(ConflictError)
     async def conflict_handler(request: Request, exc: ConflictError) -> Response:
@@ -733,7 +796,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         drive = records.create(
             DriveInput(
                 driver_name=str(form.get("driver_name", "Daniel Ahern")),
-                supervisor_name=str(form.get("supervisor_name", "")) or None,
+                supervisor_name=(
+                    _actor(request)
+                    if settings.auth_required
+                    else str(form.get("supervisor_name", "")) or None
+                ),
                 supervisor_dl_number=None,
                 supervisor_dl_state=None,
                 started_at_utc=_parse_local(
@@ -805,7 +872,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         )
         value = DriveInput(
             driver_name=str(form.get("driver_name", current["driver_name"])),
-            supervisor_name=str(form.get("supervisor_name", "")) or None,
+            supervisor_name=(
+                current["supervisor_name"]
+                if settings.auth_required
+                else str(form.get("supervisor_name", "")) or None
+            ),
             supervisor_dl_number=current["supervisor_dl_number"],
             supervisor_dl_state=current["supervisor_dl_state"],
             started_at_utc=start_utc,
@@ -875,7 +946,15 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/live/start")
     async def live_start(request: Request) -> RedirectResponse:
         form = await read_form(request)
-        live.start(request_id=str(form["request_id"]), actor_identity=_actor(request))
+        live.start(
+            request_id=str(form["request_id"]),
+            supervisor_name=(
+                _actor(request)
+                if settings.auth_required
+                else str(form.get("supervisor_name", "")) or None
+            ),
+            actor_identity=_actor(request),
+        )
         return redirect("/live")
 
     @app.post("/live/{live_id}/end")
@@ -933,7 +1012,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             weather=str(form.get("weather", "")),
             notes=str(form.get("notes", "")),
             end_location=str(form.get("end_location", "")),
-            supervisor_name=str(form.get("supervisor_name", "")) or None,
+            supervisor_name=_actor(request),
             corrected_start_utc=corrected_start,
             corrected_end_utc=corrected_end,
             actor_identity=_actor(request),

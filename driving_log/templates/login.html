@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Sign in</h1>
+  {% if login_error %}<p class="error">Sign-in details were not recognized.</p>{% endif %}
+  <form class="stacked-form" method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next_path }}">
+    <fieldset>
+      <legend>Supervising driver</legend>
+      <label class="choice"><input type="radio" name="account" value="sean" checked> Sean Ahern</label>
+      <label class="choice"><input type="radio" name="account" value="jen"> Jen Ahern</label>
+    </fieldset>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required autofocus></label>
+    <button class="primary" type="submit">Sign in</button>
+  </form>
+{% endblock %}

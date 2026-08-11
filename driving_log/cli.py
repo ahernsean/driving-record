@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import shutil
@@ -11,6 +12,7 @@ from pathlib import Path
 
 from driving_log import __version__
 from driving_log.archive import create_archive, restore_archive, verify_archive
+from driving_log.auth import password_hash
 from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
@@ -35,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
+    password = sub.add_parser("password-hash")
+    password.add_argument("password", nargs="?")
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--json", action="store_true")
     db = sub.add_parser("db")
@@ -189,6 +193,9 @@ def doctor(settings: Settings) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = Settings.from_env()
+    if args.command == "password-hash":
+        print(password_hash(args.password or getpass.getpass("Password: ")))
+        return 0
     if args.command == "install":
         install_result = install_user_units(
             Path(__file__).parent.parent,

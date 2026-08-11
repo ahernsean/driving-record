@@ -284,6 +284,7 @@ class ApplicationTests(unittest.TestCase):
                 host="127.0.0.1",
                 port=8766,
                 public_host="testserver",
+                auth_required=False,
             )
             app = create_app(settings)
 

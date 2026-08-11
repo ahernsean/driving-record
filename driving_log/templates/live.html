@@ -34,7 +34,11 @@
       {% include "_weather_picker.html" %}
       <label>End location<input name="end_location" placeholder="For example, Apex Friendship High School"></label>
       <label>Notes<textarea name="notes" rows="3"></textarea></label>
-      <label>Supervisor<input name="supervisor_name" value="{{ live.supervisor_name or 'Sean Ahern' }}"></label>
+      {% if current_user %}
+        <p>Supervising driver: <strong>{{ current_user }}</strong></p>
+      {% else %}
+        <label>Supervisor<input name="supervisor_name" value="{{ live.supervisor_name or 'Sean Ahern' }}"></label>
+      {% endif %}
       <button class="primary" type="submit">Save completed drive</button>
     </form>
     <div class="actions">
