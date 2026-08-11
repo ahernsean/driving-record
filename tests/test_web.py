@@ -136,6 +136,8 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(dashboard.status_code, 200)
                 self.assertEqual(dashboard.headers["cache-control"], "no-store")
                 self.assertIn("Start a drive", dashboard.text)
+                self.assertIn('href="/">Dashboard</a>', dashboard.text)
+                self.assertNotIn('href="/archives">Archives</a>', dashboard.text)
                 self.assertNotIn("login", dashboard.text.lower())
                 self.assertRegex(
                     dashboard.text,
@@ -335,6 +337,7 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Verified archive", archives.text)
                 imports = await client.get("/imports")
                 self.assertIn("Imports and exports", imports.text)
+                self.assertIn('href="/archives">Archives</a>', imports.text)
                 csv_export = await client.get("/csv/export")
                 self.assertEqual(csv_export.status_code, 200)
                 self.assertIn("text/csv", csv_export.headers["content-type"])

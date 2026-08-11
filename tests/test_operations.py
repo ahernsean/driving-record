@@ -118,7 +118,7 @@ class OperationTests(unittest.TestCase):
         self.assertIn("127.0.0.1:8766", readme)
         self.assertIn("127.0.0.1:8765", readme)
         self.assertIn("tailscale funnel", readme.lower())
-        self.assertIn("DRIVING_LOG_SEAN_PASSWORD_HASH", readme)
+        self.assertIn("--set-password Sean", readme)
 
     def test_no_private_seed_is_tracked_by_ignore_contract(self) -> None:
         ignore = (Path(__file__).parent.parent / ".gitignore").read_text()
@@ -345,6 +345,37 @@ class OperationTests(unittest.TestCase):
                 return_value=Path(temporary) / "result.json",
             ):
                 self.assertEqual(main(["archive", "restore-request", str(uuid.uuid4())]), 0)
+
+    def test_set_password_writes_a_private_hash_to_the_runtime_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            environment = state / "environment"
+            environment.write_text("DRIVING_LOG_SESSION_SECRET=session\n", encoding="utf-8")
+            with (
+                mock.patch.dict("os.environ", {"DRIVING_LOG_STATE_DIR": temporary}, clear=False),
+                mock.patch(
+                    "driving_log.cli.getpass.getpass", side_effect=["new-password", "new-password"]
+                ),
+            ):
+                self.assertEqual(main(["--set-password", "Sean"]), 0)
+            contents = environment.read_text(encoding="utf-8")
+            self.assertIn("DRIVING_LOG_SEAN_PASSWORD_HASH=scrypt$", contents)
+            self.assertNotIn("new-password", contents)
+            self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
+
+    def test_install_uses_the_tailscale_dns_name_when_public_host_is_omitted(self) -> None:
+        status = CompletedProcess(
+            ["tailscale"], 0, '{"Self":{"DNSName":"driving.tailnet.ts.net."}}', ""
+        )
+        with (
+            mock.patch("driving_log.cli.subprocess.run", return_value=status),
+            mock.patch("driving_log.cli.install_user_units", return_value={}) as install,
+        ):
+            self.assertEqual(
+                main(["install", "--public-scheme", "https"]),
+                0,
+            )
+        self.assertEqual(install.call_args.kwargs["public_host"], "driving.tailnet.ts.net:8443")
 
     def test_cli_dispatches_seed_csv_and_archive_variants(self) -> None:
         with (

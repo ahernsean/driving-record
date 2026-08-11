@@ -11,28 +11,22 @@ Install the checked-out stack tip:
 sudo dnf install -y epel-release
 sudo dnf install -y python3.13 python3.13-pip sqlite poppler-utils
 ./driving-log bootstrap
-./driving-log install --public-host HOSTNAME:8443 --public-scheme https
+./driving-log install --public-scheme https
 loginctl enable-linger "$USER"
 ```
 
-Before starting the service, generate separate strong passwords without putting
-the passwords into the environment file or shell history. Run the command once
-for each password and add its output to the private environment file:
+`install` finds this machine's Tailscale DNS name, creates the git-ignored
+`driving-log-runtime/` directory, copies a legacy home-directory log there if
+one exists, writes the private environment file, and installs/reloads the user
+systemd units. It does not start the service yet.
+
+Before starting, set a password for each account. Each command prompts twice;
+the tool salts and hashes the password directly into the private environment
+file, so nothing needs to be copied or pasted:
 
 ```sh
-./driving-log password-hash
-chmod 600 ./driving-log-runtime/environment
-${EDITOR:-vi} ./driving-log-runtime/environment
-```
-
-Set these two lines (using the two generated hashes), then start the service:
-
-```text
-DRIVING_LOG_SEAN_PASSWORD_HASH=scrypt$...
-DRIVING_LOG_JEN_PASSWORD_HASH=scrypt$...
-```
-
-```sh
+./driving-log --set-password Sean
+./driving-log --set-password Jen
 ./driving-log start
 tailscale funnel --bg --https=8443 http://127.0.0.1:8766
 ```

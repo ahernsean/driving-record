@@ -16,9 +16,9 @@
   <header>
     <a class="brand" href="/">Daniel Driving Log</a>
     <nav aria-label="Primary">
+      <a href="/">Dashboard</a>
       <a href="/drives">History</a>
       <a href="/imports">Data</a>
-      <a href="/archives">Archives</a>
     </nav>
     {% if current_user %}
       <form method="post" action="/logout" class="logout"><span>Signed in as {{ current_user }}</span><button type="submit">Sign out</button></form>

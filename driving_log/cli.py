@@ -33,12 +33,11 @@ from driving_log.seed import apply_seed, preview_seed
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="driving-log")
     parser.add_argument("--version", action="version", version=__version__)
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--set-password", choices=("Sean", "Jen"), metavar="NAME")
+    sub = parser.add_subparsers(dest="command")
     serve = sub.add_parser("serve")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
-    password = sub.add_parser("password-hash")
-    password.add_argument("password", nargs="?")
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--json", action="store_true")
     db = sub.add_parser("db")
@@ -46,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("start", "stop", "restart", "status", "logs"):
         sub.add_parser(command)
     install = sub.add_parser("install")
-    install.add_argument("--public-host", required=True)
+    install.add_argument("--public-host")
     install.add_argument("--public-scheme", choices=("http", "https"), default="http")
     install.add_argument("--external-archive-dir", type=Path)
     live = sub.add_parser("live")
@@ -190,16 +189,62 @@ def doctor(settings: Settings) -> dict[str, object]:
     return result
 
 
+def tailscale_public_host() -> str:
+    status = subprocess.run(
+        ["tailscale", "status", "--json"], text=True, capture_output=True, check=False
+    )
+    if status.returncode:
+        raise ValueError("could not read Tailscale status; pass --public-host HOST:8443")
+    try:
+        dns_name = json.loads(status.stdout)["Self"]["DNSName"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "could not find the Tailscale DNS name; pass --public-host HOST:8443"
+        ) from exc
+    if not isinstance(dns_name, str) or not dns_name:
+        raise ValueError("could not find the Tailscale DNS name; pass --public-host HOST:8443")
+    return f"{dns_name.rstrip('.')}:8443"
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     settings = Settings.from_env()
-    if args.command == "password-hash":
-        print(password_hash(args.password or getpass.getpass("Password: ")))
+    if args.set_password:
+        if args.command:
+            parser.error("--set-password cannot be combined with another command")
+        password = getpass.getpass(f"New password for {args.set_password}: ")
+        confirmation = getpass.getpass("Confirm password: ")
+        if password != confirmation:
+            raise ValueError("passwords do not match")
+        if not password:
+            raise ValueError("password must not be empty")
+        environment_path = settings.state_dir / "environment"
+        if not environment_path.exists():
+            raise ValueError("run driving-log install before setting a password")
+        environment = {
+            key: value
+            for line in environment_path.read_text(encoding="utf-8").splitlines()
+            if "=" in line and not line.startswith("#")
+            for key, value in [line.split("=", 1)]
+        }
+        key = f"DRIVING_LOG_{args.set_password.upper()}_PASSWORD_HASH"
+        environment[key] = password_hash(password)
+        temporary = environment_path.with_suffix(".tmp")
+        temporary.write_text(
+            "".join(f"{key}={value}\n" for key, value in sorted(environment.items())),
+            encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        os.replace(temporary, environment_path)
+        print(f"Password saved for {args.set_password}. Restart the service to use it.")
         return 0
+    if not args.command:
+        parser.error("choose a command or use --set-password NAME")
     if args.command == "install":
         install_result = install_user_units(
             Path(__file__).parent.parent,
-            public_host=args.public_host,
+            public_host=args.public_host or tailscale_public_host(),
             public_scheme=args.public_scheme,
             external_archive_dir=args.external_archive_dir,
         )
