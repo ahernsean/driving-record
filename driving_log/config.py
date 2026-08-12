@@ -82,14 +82,12 @@ class Settings:
             (
                 self.sean_password_hash,
                 self.jen_password_hash,
-                self.daniel_password_hash,
                 self.session_secret,
             )
         ):
             raise ValueError(
                 "authentication is required; configure DRIVING_LOG_SEAN_PASSWORD_HASH, "
-                "DRIVING_LOG_JEN_PASSWORD_HASH, DRIVING_LOG_DANIEL_PASSWORD_HASH, and "
-                "DRIVING_LOG_SESSION_SECRET"
+                "DRIVING_LOG_JEN_PASSWORD_HASH, and DRIVING_LOG_SESSION_SECRET"
             )
 
     def ensure_directories(self) -> None:

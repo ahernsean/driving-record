@@ -2,7 +2,7 @@
 
 The application listens only on `127.0.0.1:8766`. When it is exposed through
 Tailscale Funnel, its application login is the access boundary. It has three
-accounts: Sean Ahern and Jen Ahern can record drives, while Daniel Ahern has
+accounts: Sean Ahern and Jen Ahern can record drives. Daniel Ahern can be given
 view-only access to the log, CSV backup, and DMV PDF. The account that starts
 or saves a drive is recorded as that drive's supervising driver.
 
@@ -41,7 +41,8 @@ one-shot commands.
 Before changing Funnel, save `tailscale serve status --json` and verify the
 existing HTTP port 80 handler still forwards to Wordle on `127.0.0.1:8765`.
 Never bind this application to a LAN or tailnet address. The service refuses to
-start unless all three password hashes are configured; the installer creates the
+start unless Sean and Jen's password hashes are configured; Daniel's account is
+available after its password is set. The installer creates the
 separate session-signing secret automatically.
 
 The git-ignored `driving-log-runtime/` directory holds the mode-`0600`

@@ -33,8 +33,8 @@ class Authenticator:
         return ACCOUNTS[account]
 
     @staticmethod
-    def is_read_only(user: str) -> bool:
-        return user == ACCOUNTS["daniel"]
+    def can_mutate(user: str) -> bool:
+        return user in (ACCOUNTS["sean"], ACCOUNTS["jen"])
 
     def make_session(self, user: str) -> str:
         payload = {

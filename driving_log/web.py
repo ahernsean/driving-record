@@ -110,7 +110,7 @@ GROUP_BY_OPTIONS = (
     ("duration", "Duration"),
 )
 AUTH_SUPERVISORS = (ACCOUNTS["sean"], ACCOUNTS["jen"])
-READ_ONLY_ALLOWED_MUTATIONS = frozenset({"/login", "/logout"})
+MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives"})
 
 
 def _part_of_day(value: str | datetime, timezone_name: str) -> str:
@@ -253,6 +253,10 @@ def _is_read_only(request: Request) -> bool:
     return bool(getattr(request.state, "is_read_only", False))
 
 
+def _is_mutation_page(path: str) -> bool:
+    return path in MUTATION_PAGE_PATHS or (path.startswith("/drives/") and path.endswith("/edit"))
+
+
 def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
@@ -279,9 +283,10 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     ) -> Response:
         if settings.auth_required:
             request.state.user = authenticator.session_user(request.cookies.get(COOKIE_NAME))
-            request.state.is_read_only = bool(
-                request.state.user and authenticator.is_read_only(request.state.user)
+            request.state.can_mutate = bool(
+                request.state.user and authenticator.can_mutate(request.state.user)
             )
+            request.state.is_read_only = bool(request.state.user and not request.state.can_mutate)
             public_path = request.url.path in {"/login", "/health/live", "/health/ready"}
             requires_login = not public_path and not request.url.path.startswith("/static/")
             if requires_login and not request.state.user:
@@ -292,9 +297,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                     next_path += f"?{request.url.query}"
                 return RedirectResponse(f"/login?next={next_path}", status_code=303)
             if (
-                request.state.is_read_only
-                and request.method not in {"GET", "HEAD", "OPTIONS"}
-                and request.url.path not in READ_ONLY_ALLOWED_MUTATIONS
+                request.url.path not in {"/login", "/logout"}
+                and not request.state.can_mutate
+                and (
+                    request.method not in {"GET", "HEAD", "OPTIONS"}
+                    or _is_mutation_page(request.url.path)
+                )
             ):
                 return JSONResponse({"detail": "view-only account"}, status_code=403)
         response = await call_next(request)

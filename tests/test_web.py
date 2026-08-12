@@ -91,6 +91,13 @@ class WebTests(unittest.TestCase):
                 protected = await client.get("/drives")
                 self.assertEqual(protected.status_code, 303)
                 self.assertEqual(protected.headers["location"], "/login?next=/drives")
+                mutation_without_session = await client.post(
+                    "/drives", data={"request_id": str(uuid.uuid4())}
+                )
+                self.assertEqual(mutation_without_session.status_code, 303)
+                self.assertEqual(
+                    mutation_without_session.headers["location"], "/login?next=/drives"
+                )
                 failed = await client.post(
                     "/login", data={"account": "jen", "password": "wrong", "next": "/"}
                 )
@@ -224,10 +231,16 @@ class WebTests(unittest.TestCase):
                     self.assertEqual(history.status_code, 200)
                     self.assertIn("Group filtered drives by", history.text)
                     self.assertNotIn("Add drive", history.text)
+                    self.assertEqual((await daniel.get("/drives/new")).status_code, 403)
+                    self.assertEqual((await daniel.get("/live")).status_code, 403)
+                    self.assertEqual((await daniel.get("/archives")).status_code, 403)
                     detail = await daniel.get(f"/drives/{drive_id}")
                     self.assertEqual(detail.status_code, 200)
                     self.assertNotIn("Edit drive", detail.text)
                     self.assertNotIn("Delete drive", detail.text)
+                    self.assertEqual(
+                        (await daniel.get(f"/drives/{drive_id}/edit")).status_code, 403
+                    )
                     self.assertEqual((await daniel.get("/csv/export")).status_code, 200)
                     self.assertEqual((await daniel.get("/dmv/export")).status_code, 200)
                     dmv_page = await daniel.get("/dmv")
