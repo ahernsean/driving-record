@@ -9,10 +9,10 @@
   {% if saved_drive %}
     <div class="completion-note drive-saved-banner" data-drive-saved-banner>
       <strong>{{ format_minutes(saved_drive.duration_minutes) }} drive saved</strong>
-      <a class="button compact" href="/drives/{{ saved_drive.id }}/edit">Edit drive</a>
+      {% if not is_read_only %}<a class="button compact" href="/drives/{{ saved_drive.id }}/edit">Edit drive</a>{% endif %}
     </div>
   {% endif %}
-  {% if live %}
+  {% if live and not is_read_only %}
     <a class="live-banner" href="/live">
       {{ "Drive in progress" if live.status == "active" else "Finish saving drive" }}
     </a>
@@ -72,13 +72,13 @@
     </section>
   {% endif %}
   <section class="actions">
-    {% if not live %}
+    {% if not live and not is_read_only %}
       <form method="post" action="/live/start" data-async-submit>
         <input type="hidden" name="request_id" value="{{ request.state.request_id if request.state.request_id is defined else '00000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
         <button class="primary" type="submit">Start a drive</button>
       </form>
     {% endif %}
-    <a class="button" href="/drives/new">Add drive</a>
+    {% if not is_read_only %}<a class="button" href="/drives/new">Add drive</a>{% endif %}
     <a class="button" href="/drives">View drives</a>
     <a class="button secondary" href="/imports">Import or export</a>
   </section>

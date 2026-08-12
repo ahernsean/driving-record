@@ -26,6 +26,7 @@ class Settings:
     sean_password_hash: str = ""
     jen_password_hash: str = ""
     session_secret: str = ""
+    daniel_password_hash: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -73,11 +74,16 @@ class Settings:
             sean_password_hash=os.environ.get("DRIVING_LOG_SEAN_PASSWORD_HASH", ""),
             jen_password_hash=os.environ.get("DRIVING_LOG_JEN_PASSWORD_HASH", ""),
             session_secret=os.environ.get("DRIVING_LOG_SESSION_SECRET", ""),
+            daniel_password_hash=os.environ.get("DRIVING_LOG_DANIEL_PASSWORD_HASH", ""),
         )
 
     def validate_authentication(self) -> None:
         if self.auth_required and not all(
-            (self.sean_password_hash, self.jen_password_hash, self.session_secret)
+            (
+                self.sean_password_hash,
+                self.jen_password_hash,
+                self.session_secret,
+            )
         ):
             raise ValueError(
                 "authentication is required; configure DRIVING_LOG_SEAN_PASSWORD_HASH, "

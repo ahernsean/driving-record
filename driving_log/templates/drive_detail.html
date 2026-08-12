@@ -30,7 +30,7 @@
         <p>
           {{ warning.message }}
           {% if warning.action == "review_import" %}
-            <a href="/drives/{{ drive.id }}/edit">Review and save this drive to clear this import warning.</a>
+            {% if is_read_only %}Review this imported drive.{% else %}<a href="/drives/{{ drive.id }}/edit">Review and save this drive to clear this import warning.</a>{% endif %}
           {% endif %}
         </p>
       {% endfor %}
@@ -55,7 +55,7 @@
       {% endif %}
     </section>
   {% endif %}
-  <div class="actions">
+  {% if not is_read_only %}<div class="actions">
     <a class="button" href="/drives/{{ drive.id }}/edit">Edit drive</a>
     <a class="button" href="/drives/new?from={{ drive.id }}">Add another drive</a>
     <form method="post" action="/drives/{{ drive.id }}/delete" data-async-submit onsubmit="return confirm('Delete this drive? It remains in audit history.')">
@@ -64,4 +64,5 @@
       <button class="danger" type="submit">Delete drive</button>
     </form>
   </div>
+  {% endif %}
 {% endblock %}

@@ -33,7 +33,7 @@ from driving_log.seed import apply_seed, preview_seed
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="driving-log")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("--set-password", choices=("Sean", "Jen"), metavar="NAME")
+    parser.add_argument("--set-password", choices=("Sean", "Jen", "Daniel"), metavar="NAME")
     sub = parser.add_subparsers(dest="command")
     serve = sub.add_parser("serve")
     serve.add_argument("--host")

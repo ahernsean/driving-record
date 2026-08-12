@@ -25,7 +25,7 @@
     <a class="button primary" href="/dmv/export">Download filled DL-4A PDF</a>
   </section>
 
-  <h2>Supervising drivers</h2>
+  {% if not is_read_only %}<h2>Supervising drivers</h2>
   <p class="muted">License details are stored in the private database and full-state archives. They are not included in CSV backups.</p>
   {% for profile in profiles %}
     <article class="detail-card profile-card">
@@ -64,4 +64,5 @@
     <label>State<input required maxlength="2" autocapitalize="characters" name="dl_state" placeholder="NC"></label>
     <button class="primary" type="submit">Save supervising driver</button>
   </form>
+  {% endif %}
 {% endblock %}

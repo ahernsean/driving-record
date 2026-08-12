@@ -109,7 +109,8 @@ GROUP_BY_OPTIONS = (
     ("weather", "Weather"),
     ("duration", "Duration"),
 )
-AUTH_SUPERVISORS = tuple(ACCOUNTS.values())
+AUTH_SUPERVISORS = (ACCOUNTS["sean"], ACCOUNTS["jen"])
+MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives"})
 
 
 def _part_of_day(value: str | datetime, timezone_name: str) -> str:
@@ -248,6 +249,14 @@ def _actor(request: Request) -> str | None:
     return cast(str | None, getattr(request.state, "user", None))
 
 
+def _is_read_only(request: Request) -> bool:
+    return bool(getattr(request.state, "is_read_only", False))
+
+
+def _is_mutation_page(path: str) -> bool:
+    return path in MUTATION_PAGE_PATHS or (path.startswith("/drives/") and path.endswith("/edit"))
+
+
 def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
@@ -260,7 +269,10 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     profiles = SupervisorProfileService(database)
     dmv = DmvExportService(database)
     authenticator = Authenticator(
-        settings.sean_password_hash, settings.jen_password_hash, settings.session_secret
+        settings.sean_password_hash,
+        settings.jen_password_hash,
+        settings.session_secret,
+        settings.daniel_password_hash,
     )
     login_failures: dict[tuple[str, str], tuple[int, float]] = {}
     login_failures_lock = asyncio.Lock()
@@ -271,6 +283,10 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     ) -> Response:
         if settings.auth_required:
             request.state.user = authenticator.session_user(request.cookies.get(COOKIE_NAME))
+            request.state.can_mutate = bool(
+                request.state.user and authenticator.can_mutate(request.state.user)
+            )
+            request.state.is_read_only = bool(request.state.user and not request.state.can_mutate)
             public_path = request.url.path in {"/login", "/health/live", "/health/ready"}
             requires_login = not public_path and not request.url.path.startswith("/static/")
             if requires_login and not request.state.user:
@@ -280,6 +296,15 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 if request.url.query:
                     next_path += f"?{request.url.query}"
                 return RedirectResponse(f"/login?next={next_path}", status_code=303)
+            if (
+                request.url.path not in {"/login", "/logout"}
+                and not request.state.can_mutate
+                and (
+                    request.method not in {"GET", "HEAD", "OPTIONS"}
+                    or _is_mutation_page(request.url.path)
+                )
+            ):
+                return JSONResponse({"detail": "view-only account"}, status_code=403)
         response = await call_next(request)
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Cache-Control"] = "no-store"
@@ -293,6 +318,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             "format_local_date": _format_local_date,
             "asset_version": asset_version,
             "current_user": _actor(request),
+            "is_read_only": _is_read_only(request),
             **_theme_context(),
             **values,
         }

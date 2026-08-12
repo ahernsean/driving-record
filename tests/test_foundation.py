@@ -51,6 +51,8 @@ class DatabaseTests(unittest.TestCase):
         authenticator = Authenticator(encoded_password, encoded_password, "session-secret")
         token = authenticator.make_session("Sean Ahern")
         self.assertEqual(authenticator.session_user(token), "Sean Ahern")
+        self.assertTrue(authenticator.can_mutate("Sean Ahern"))
+        self.assertFalse(authenticator.can_mutate("Daniel Ahern"))
         rotated = Authenticator(password_hash("rotated"), encoded_password, "session-secret")
         self.assertIsNone(rotated.session_user(token))
         self.assertIsNone(authenticator.session_user(f"{token}changed"))
@@ -63,6 +65,23 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNone(authenticator.session_user(signed({"user": "Sean Ahern"})))
         self.assertIsNone(authenticator.session_user(signed({"user": "Other", "exp": 9999999999})))
         self.assertIsNone(authenticator.session_user(signed({"user": "Sean Ahern", "exp": 0})))
+
+    def test_daniel_password_is_optional_for_an_existing_deployment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            settings = Settings(
+                state_dir=state,
+                database_path=state / "database.sqlite3",
+                archive_dir=state / "archives",
+                restore_dir=state / "restore",
+                host="127.0.0.1",
+                port=8766,
+                public_host="driving.example.ts.net:8443",
+                sean_password_hash="configured",
+                jen_password_hash="configured",
+                session_secret="configured",
+            )
+            settings.validate_authentication()
 
     def test_initializes_schema_and_production_pragmas(self) -> None:
         database = Database(self.path)

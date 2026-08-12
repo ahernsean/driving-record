@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 COOKIE_NAME = "driving_log_session"
 SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30
-ACCOUNTS = {"sean": "Sean Ahern", "jen": "Jen Ahern"}
+ACCOUNTS = {"sean": "Sean Ahern", "jen": "Jen Ahern", "daniel": "Daniel Ahern"}
 SCRYPT_N = 2**17
 SCRYPT_MAXMEM = 256 * 1024 * 1024
 
@@ -20,15 +20,21 @@ class Authenticator:
     sean_password_hash: str
     jen_password_hash: str
     session_secret: str
+    daniel_password_hash: str = ""
 
     def authenticate(self, account: str, password: str) -> str | None:
         password_hash = {
             "sean": self.sean_password_hash,
             "jen": self.jen_password_hash,
+            "daniel": self.daniel_password_hash,
         }.get(account)
         if not password_hash or not verify_password(password, password_hash):
             return None
         return ACCOUNTS[account]
+
+    @staticmethod
+    def can_mutate(user: str) -> bool:
+        return user in (ACCOUNTS["sean"], ACCOUNTS["jen"])
 
     def make_session(self, user: str) -> str:
         payload = {
@@ -72,6 +78,7 @@ class Authenticator:
         password_hash = {
             "Sean Ahern": self.sean_password_hash,
             "Jen Ahern": self.jen_password_hash,
+            "Daniel Ahern": self.daniel_password_hash,
         }[user]
         return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
 
