@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -119,6 +120,7 @@ class OperationTests(unittest.TestCase):
         self.assertIn("127.0.0.1:8765", readme)
         self.assertIn("tailscale funnel", readme.lower())
         self.assertIn("--set-password Sean", readme)
+        self.assertIn("--set-password Daniel", readme)
 
     def test_no_private_seed_is_tracked_by_ignore_contract(self) -> None:
         ignore = (Path(__file__).parent.parent / ".gitignore").read_text()
@@ -360,6 +362,22 @@ class OperationTests(unittest.TestCase):
                 self.assertEqual(main(["--set-password", "Sean"]), 0)
             contents = environment.read_text(encoding="utf-8")
             self.assertIn("DRIVING_LOG_SEAN_PASSWORD_HASH=scrypt$", contents)
+            self.assertNotIn("new-password", contents)
+
+    def test_set_password_supports_daniel_view_only_account(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            environment = state / "environment"
+            environment.write_text("DRIVING_LOG_STATE_DIR=" + str(state) + "\n")
+            with (
+                mock.patch.dict(os.environ, {"DRIVING_LOG_STATE_DIR": str(state)}),
+                mock.patch(
+                    "driving_log.cli.getpass.getpass", side_effect=["new-password", "new-password"]
+                ),
+            ):
+                self.assertEqual(main(["--set-password", "Daniel"]), 0)
+            contents = environment.read_text()
+            self.assertIn("DRIVING_LOG_DANIEL_PASSWORD_HASH=scrypt$", contents)
             self.assertNotIn("new-password", contents)
             self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
 

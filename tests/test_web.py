@@ -74,6 +74,7 @@ class WebTests(unittest.TestCase):
             auth_required=True,
             sean_password_hash=password_hash("sean-password"),
             jen_password_hash=password_hash("jen-password"),
+            daniel_password_hash=password_hash("daniel-password"),
             session_secret="test-session-secret",
         )
         app = create_app(settings)
@@ -153,6 +154,110 @@ class WebTests(unittest.TestCase):
 
         self.run_async(scenario)
 
+    def test_daniel_has_read_only_access_and_can_export_records(self) -> None:
+        settings = Settings(
+            state_dir=self.settings.state_dir,
+            database_path=self.settings.database_path,
+            archive_dir=self.settings.archive_dir,
+            restore_dir=self.settings.restore_dir,
+            host=self.settings.host,
+            port=self.settings.port,
+            public_host=self.settings.public_host,
+            auth_required=True,
+            sean_password_hash=password_hash("sean-password"),
+            jen_password_hash=password_hash("jen-password"),
+            daniel_password_hash=password_hash("daniel-password"),
+            session_secret="test-session-secret",
+        )
+        app = create_app(settings)
+
+        async def scenario() -> None:
+            async with (
+                app.router.lifespan_context(app),
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as editor,
+            ):
+                signed_in = await editor.post(
+                    "/login",
+                    data={"account": "sean", "password": "sean-password", "next": "/"},
+                )
+                self.assertEqual(signed_in.status_code, 303)
+                created = await editor.post(
+                    "/drives",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "driver_name": "Daniel Ahern",
+                        "supervisor_name": "Sean Ahern",
+                        "started_at_local": "2026-07-20T12:00",
+                        "ended_at_local": "2026-07-20T12:30",
+                        "road_type": "local",
+                    },
+                )
+                self.assertEqual(created.status_code, 303)
+                drive_id = created.headers["location"].rsplit("/", 1)[-1]
+                connection = app.state.database.connect_readonly()
+                before = connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0]
+                connection.close()
+
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://testserver",
+                    follow_redirects=False,
+                ) as daniel:
+                    signed_in = await daniel.post(
+                        "/login",
+                        data={
+                            "account": "daniel",
+                            "password": "daniel-password",
+                            "next": "/",
+                        },
+                    )
+                    self.assertEqual(signed_in.status_code, 303)
+                    dashboard = await daniel.get("/")
+                    self.assertIn("Signed in as Daniel Ahern (view only)", dashboard.text)
+                    self.assertNotIn("Start a drive", dashboard.text)
+                    self.assertNotIn("Add drive", dashboard.text)
+                    history = await daniel.get("/drives?group_by=supervisor")
+                    self.assertEqual(history.status_code, 200)
+                    self.assertIn("Group filtered drives by", history.text)
+                    self.assertNotIn("Add drive", history.text)
+                    detail = await daniel.get(f"/drives/{drive_id}")
+                    self.assertEqual(detail.status_code, 200)
+                    self.assertNotIn("Edit drive", detail.text)
+                    self.assertNotIn("Delete drive", detail.text)
+                    self.assertEqual((await daniel.get("/csv/export")).status_code, 200)
+                    self.assertEqual((await daniel.get("/dmv/export")).status_code, 200)
+                    dmv_page = await daniel.get("/dmv")
+                    self.assertIn("Download filled DL-4A PDF", dmv_page.text)
+                    self.assertNotIn("Add license information", dmv_page.text)
+                    self.assertEqual(
+                        (
+                            await daniel.post("/drives", data={"request_id": str(uuid.uuid4())})
+                        ).status_code,
+                        403,
+                    )
+                    self.assertEqual(
+                        (await daniel.post(f"/drives/{drive_id}/edit", data={})).status_code,
+                        403,
+                    )
+                    self.assertEqual(
+                        (await daniel.post(f"/drives/{drive_id}/delete", data={})).status_code,
+                        403,
+                    )
+                    self.assertEqual((await daniel.post("/csv/import", data={})).status_code, 403)
+                    self.assertEqual((await daniel.post("/dmv/profiles", data={})).status_code, 403)
+                    self.assertEqual((await daniel.post("/archives", data={})).status_code, 403)
+
+                connection = app.state.database.connect_readonly()
+                after = connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0]
+                connection.close()
+                self.assertEqual(after, before)
+
+        self.run_async(scenario)
+
     def test_concurrent_failed_logins_advance_backoff_atomically(self) -> None:
         settings = Settings(
             state_dir=self.settings.state_dir,
@@ -165,6 +270,7 @@ class WebTests(unittest.TestCase):
             auth_required=True,
             sean_password_hash="configured",
             jen_password_hash="configured",
+            daniel_password_hash="configured",
             session_secret="test-session-secret",
         )
         app = create_app(settings)

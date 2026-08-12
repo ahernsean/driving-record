@@ -19,7 +19,7 @@
 {% block content %}
   <div class="page-heading">
     <h1>Drive history</h1>
-    <a class="button compact" href="/drives/new">Add drive</a>
+    {% if not is_read_only %}<a class="button compact" href="/drives/new">Add drive</a>{% endif %}
   </div>
 
   <details class="history-controls">

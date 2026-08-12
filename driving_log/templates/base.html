@@ -24,7 +24,7 @@
   <main>{% block content %}{% endblock %}</main>
   {% if current_user %}
     <footer class="account-footer">
-      <span>Signed in as {{ current_user }}</span>
+      <span>Signed in as {{ current_user }}{% if is_read_only %} (view only){% endif %}</span>
       <form method="post" action="/logout"><button type="submit">Sign out</button></form>
     </footer>
   {% endif %}
