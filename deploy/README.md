@@ -1,10 +1,11 @@
 # Rocky deployment
 
 The application listens only on `127.0.0.1:8766`. When it is exposed through
-Tailscale Funnel, its application login is the access boundary. It has three
-accounts: Sean Ahern and Jen Ahern can record drives. Daniel Ahern can be given
-view-only access to the log, CSV backup, and DMV PDF. The account that starts
-or saves a drive is recorded as that drive's supervising driver.
+Tailscale Funnel, its application login is the access boundary. It has four
+accounts: Sean Ahern, Jen Ahern, and Bethany O'Banion can record drives.
+Daniel Ahern can be given view-only access to the log, CSV backup, and DMV PDF.
+The account that starts or saves a drive is recorded as that drive's supervising
+driver.
 
 Install the checked-out stack tip:
 
@@ -28,6 +29,7 @@ file, so nothing needs to be copied or pasted:
 ```sh
 ./driving-log --set-password Sean
 ./driving-log --set-password Jen
+./driving-log --set-password Bethany
 ./driving-log --set-password Daniel
 ./driving-log start
 tailscale funnel --bg --https=8443 http://127.0.0.1:8766
@@ -41,9 +43,30 @@ one-shot commands.
 Before changing Funnel, save `tailscale serve status --json` and verify the
 existing HTTP port 80 handler still forwards to Wordle on `127.0.0.1:8765`.
 Never bind this application to a LAN or tailnet address. The service refuses to
-start unless Sean and Jen's password hashes are configured; Daniel's account is
-available after its password is set. The installer creates the
-separate session-signing secret automatically.
+start unless Sean and Jen's password hashes are configured; Bethany's and
+Daniel's accounts are available after their passwords are set. The installer
+creates the separate session-signing secret automatically.
+
+### Updating an existing deployment
+
+After an update has merged, run these commands from the checked-out repository
+on the Rocky host:
+
+```sh
+./driving-log stop
+git pull --ff-only origin main
+./driving-log --set-password Bethany
+./driving-log install --public-scheme https
+./driving-log start
+./driving-log status
+```
+
+The password command prompts twice and writes only a salted hash to the private
+runtime environment. Stopping first ensures the old process cannot continue
+using the previous environment. `install` reloads the user units and applies
+the checked-out code; `start` brings the web service and archive timer back up.
+If the deployment uses an explicit `--public-host`, pass that same value to
+`install` instead of relying on Tailscale DNS discovery.
 
 The git-ignored `driving-log-runtime/` directory holds the mode-`0600`
 environment file and database, plus mode-`0700` archive and restore-request

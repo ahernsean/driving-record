@@ -48,10 +48,14 @@ class DatabaseTests(unittest.TestCase):
         self.assertFalse(verify_password("password", "not-a-password-hash"))
         with self.assertRaisesRegex(ValueError, "empty"):
             password_hash("")
-        authenticator = Authenticator(encoded_password, encoded_password, "session-secret")
+        authenticator = Authenticator(
+            encoded_password, encoded_password, "session-secret", "", encoded_password
+        )
         token = authenticator.make_session("Sean Ahern")
         self.assertEqual(authenticator.session_user(token), "Sean Ahern")
+        self.assertEqual(authenticator.authenticate("bethany", "password"), "Bethany O'Banion")
         self.assertTrue(authenticator.can_mutate("Sean Ahern"))
+        self.assertTrue(authenticator.can_mutate("Bethany O'Banion"))
         self.assertFalse(authenticator.can_mutate("Daniel Ahern"))
         rotated = Authenticator(password_hash("rotated"), encoded_password, "session-secret")
         self.assertIsNone(rotated.session_user(token))

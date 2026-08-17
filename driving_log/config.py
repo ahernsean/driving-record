@@ -27,6 +27,7 @@ class Settings:
     jen_password_hash: str = ""
     session_secret: str = ""
     daniel_password_hash: str = ""
+    bethany_password_hash: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -75,6 +76,7 @@ class Settings:
             jen_password_hash=os.environ.get("DRIVING_LOG_JEN_PASSWORD_HASH", ""),
             session_secret=os.environ.get("DRIVING_LOG_SESSION_SECRET", ""),
             daniel_password_hash=os.environ.get("DRIVING_LOG_DANIEL_PASSWORD_HASH", ""),
+            bethany_password_hash=os.environ.get("DRIVING_LOG_BETHANY_PASSWORD_HASH", ""),
         )
 
     def validate_authentication(self) -> None:
