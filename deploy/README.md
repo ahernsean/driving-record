@@ -28,6 +28,7 @@ file, so nothing needs to be copied or pasted:
 ```sh
 ./driving-log --set-password Sean
 ./driving-log --set-password Jen
+./driving-log --set-password Bethany
 ./driving-log --set-password Daniel
 ./driving-log start
 tailscale funnel --bg --https=8443 http://127.0.0.1:8766
@@ -41,8 +42,9 @@ one-shot commands.
 Before changing Funnel, save `tailscale serve status --json` and verify the
 existing HTTP port 80 handler still forwards to Wordle on `127.0.0.1:8765`.
 Never bind this application to a LAN or tailnet address. The service refuses to
-start unless Sean and Jen's password hashes are configured; Daniel's account is
-available after its password is set. The installer creates the
+start unless Sean and Jen's password hashes are configured; Bethany's and
+Daniel's accounts are available after their passwords are set. The installer
+creates the
 separate session-signing secret automatically.
 
 The git-ignored `driving-log-runtime/` directory holds the mode-`0600`

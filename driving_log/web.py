@@ -109,7 +109,7 @@ GROUP_BY_OPTIONS = (
     ("weather", "Weather"),
     ("duration", "Duration"),
 )
-AUTH_SUPERVISORS = (ACCOUNTS["sean"], ACCOUNTS["jen"])
+AUTH_SUPERVISORS = (ACCOUNTS["sean"], ACCOUNTS["jen"], ACCOUNTS["bethany"])
 MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives"})
 
 
@@ -273,6 +273,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         settings.jen_password_hash,
         settings.session_secret,
         settings.daniel_password_hash,
+        settings.bethany_password_hash,
     )
     login_failures: dict[tuple[str, str], tuple[int, float]] = {}
     login_failures_lock = asyncio.Lock()
@@ -337,7 +338,9 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     ) -> str | None:
         value = str(form.get("supervisor_name", default or _actor(request) or "")) or None
         if settings.auth_required and value not in AUTH_SUPERVISORS:
-            raise ValueError("Choose Sean Ahern or Jen Ahern as the supervising driver")
+            raise ValueError(
+                "Choose Sean Ahern, Jen Ahern, or Bethany O'Banion as the supervising driver"
+            )
         return value
 
     def safe_next(value: str | None) -> str:
