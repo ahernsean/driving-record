@@ -11,6 +11,8 @@ import urllib.request
 import pytest
 from playwright.sync_api import sync_playwright
 
+from driving_log.auth import password_hash
+
 
 def _available_port() -> int:
     with socket.socket() as listener:
@@ -157,6 +159,80 @@ def test_overlap_warning_distinguishes_dst_fallback_folds() -> None:
                 page.locator('[name="started_at_local"]').fill("2026-11-01T01:00")
                 page.locator('[name="ended_at_local"]').fill("2026-11-01T01:30")
                 assert page.locator("[data-overlap-warning]").is_hidden()
+                browser.close()
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+
+
+@pytest.mark.browser
+def test_expired_export_session_returns_to_sign_in() -> None:
+    port = _available_port()
+    with tempfile.TemporaryDirectory() as temporary:
+        environment = {
+            **os.environ,
+            "DRIVING_LOG_STATE_DIR": temporary,
+            "DRIVING_LOG_PORT": str(port),
+            "DRIVING_LOG_PUBLIC_HOST": f"127.0.0.1:{port}",
+            "DRIVING_LOG_AUTH_REQUIRED": "1",
+            "DRIVING_LOG_SEAN_PASSWORD_HASH": password_hash("sean-password"),
+            "DRIVING_LOG_JEN_PASSWORD_HASH": password_hash("jen-password"),
+            "DRIVING_LOG_SESSION_SECRET": "test-session-secret",
+        }
+        server = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "driving_log.app:create_app",
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            url = f"http://127.0.0.1:{port}"
+            for _ in range(100):
+                if server.poll() is not None:
+                    output = server.stdout.read() if server.stdout else ""
+                    raise AssertionError(f"test server exited early:\n{output}")
+                try:
+                    if urllib.request.urlopen(f"{url}/health/ready", timeout=0.2).status == 200:
+                        break
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                raise AssertionError("test server did not become ready")
+
+            with sync_playwright() as playwright:
+                local_chrome = os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local"
+                browser = (
+                    playwright.chromium.launch(
+                        executable_path="/usr/bin/google-chrome", headless=True
+                    )
+                    if local_chrome
+                    else playwright.webkit.launch(headless=True)
+                )
+                context = browser.new_context()
+                page = context.new_page()
+                page.goto(f"{url}/login?next=/imports")
+                page.locator('input[name="password"]').fill("sean-password")
+                page.get_by_role("button", name="Sign in").click()
+                page.wait_for_url(f"{url}/imports")
+                context.clear_cookies()
+                page.get_by_role("link", name="Download CSV backup").click()
+                page.wait_for_url(f"{url}/login?next=/csv/export")
+                assert page.get_by_role("heading", name="Sign in").is_visible()
                 browser.close()
         finally:
             server.terminate()

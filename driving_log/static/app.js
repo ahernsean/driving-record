@@ -388,6 +388,10 @@
       setStatus("Preparing file…");
       try {
         const response = await fetch(link.href, {cache: "no-store"});
+        if (response.redirected) {
+          window.location.assign(response.url);
+          return;
+        }
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
         file = new File([await response.blob()], filename, {
           type: response.headers.get("content-type") || "application/octet-stream",
