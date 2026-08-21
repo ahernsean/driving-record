@@ -22,7 +22,8 @@
   {% endif %}
 
   <section class="actions">
-    <a class="button primary" href="/dmv/export">Download filled DL-4A PDF</a>
+    <a class="button primary" href="/dmv/export" data-file-export data-export-filename="Daniel-driving-log-DL-4A.pdf">Download filled DL-4A PDF</a>
+    <span class="muted" data-export-status aria-live="polite"></span>
   </section>
 
   {% if not is_read_only %}<h2>Supervising drivers</h2>

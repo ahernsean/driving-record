@@ -227,6 +227,14 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     has_touch=True,
                 )
                 page = context.new_page()
+                page.add_init_script(
+                    """Object.defineProperty(navigator, "canShare", {
+                      value: data => Array.isArray(data.files) && data.files.length === 1,
+                    });
+                    Object.defineProperty(navigator, "share", {
+                      value: async data => { window.sharedExportName = data.files[0].name; },
+                    });"""
+                )
                 page.goto(url)
                 assert "Daniel Driving Log" in page.title()
                 assert page.locator(".progress-card").is_visible()
@@ -276,6 +284,18 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     "els => Math.min(...els.map(el => el.getBoundingClientRect().height))"
                 )
                 assert smallest_button >= 44
+                page.get_by_role("link", name="Import or export").click()
+                csv_download = page.get_by_role("link", name="Download CSV backup")
+                csv_download.click()
+                page.get_by_role("link", name="Save CSV backup").wait_for()
+                assert page.url == f"{url}/imports"
+                assert (
+                    "Ready. Tap Save CSV backup"
+                    in page.locator("[data-export-status]").text_content()
+                )
+                page.get_by_role("link", name="Save CSV backup").click()
+                page.wait_for_function("window.sharedExportName === 'driving-log.csv'")
+                assert page.url == f"{url}/imports"
                 page.get_by_role("link", name="History").click()
                 filters = page.locator(".history-controls")
                 assert filters.get_attribute("open") is None
