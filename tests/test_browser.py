@@ -20,6 +20,17 @@ def _available_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def _launch_browser(playwright: object) -> object:
+    webkit_endpoint = os.environ.get("DRIVING_LOG_WEBKIT_WS_ENDPOINT")
+    if webkit_endpoint:
+        return playwright.webkit.connect(webkit_endpoint)  # type: ignore[union-attr]
+    if os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local":
+        return playwright.chromium.launch(  # type: ignore[union-attr]
+            executable_path="/usr/bin/google-chrome", headless=True
+        )
+    return playwright.webkit.launch(headless=True)  # type: ignore[union-attr]
+
+
 @pytest.mark.browser
 def test_quick_live_drive_save_reports_short_duration_without_hanging() -> None:
     port = _available_port()
@@ -65,14 +76,7 @@ def test_quick_live_drive_save_reports_short_duration_without_hanging() -> None:
                 raise AssertionError(f"test server did not become ready\n{output}")
 
             with sync_playwright() as playwright:
-                local_chrome = os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local"
-                browser = (
-                    playwright.chromium.launch(
-                        executable_path="/usr/bin/google-chrome", headless=True
-                    )
-                    if local_chrome
-                    else playwright.webkit.launch(headless=True)
-                )
+                browser = _launch_browser(playwright)
                 page = browser.new_page()
                 dialogs: list[str] = []
                 page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
@@ -137,13 +141,7 @@ def test_overlap_warning_distinguishes_dst_fallback_folds() -> None:
                 raise AssertionError("test server did not become ready")
 
             with sync_playwright() as playwright:
-                browser = (
-                    playwright.chromium.launch(
-                        executable_path="/usr/bin/google-chrome", headless=True
-                    )
-                    if os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local"
-                    else playwright.webkit.launch(headless=True)
-                )
+                browser = _launch_browser(playwright)
                 page = browser.new_page()
                 page.goto(f"{url}/drives/new")
                 page.locator('[name="start_fold"]').evaluate("element => element.value = '0'")
@@ -215,14 +213,7 @@ def test_expired_export_session_returns_to_sign_in() -> None:
                 raise AssertionError("test server did not become ready")
 
             with sync_playwright() as playwright:
-                local_chrome = os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local"
-                browser = (
-                    playwright.chromium.launch(
-                        executable_path="/usr/bin/google-chrome", headless=True
-                    )
-                    if local_chrome
-                    else playwright.webkit.launch(headless=True)
-                )
+                browser = _launch_browser(playwright)
                 context = browser.new_context()
                 page = context.new_page()
                 page.goto(f"{url}/login?next=/imports")
@@ -288,14 +279,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 raise AssertionError(f"test server did not become ready\n{output}")
 
             with sync_playwright() as playwright:
-                local_chrome = os.environ.get("DRIVING_LOG_BROWSER") == "chromium-local"
-                browser = (
-                    playwright.chromium.launch(
-                        executable_path="/usr/bin/google-chrome", headless=True
-                    )
-                    if local_chrome
-                    else playwright.webkit.launch(headless=True)
-                )
+                browser = _launch_browser(playwright)
                 context = browser.new_context(
                     viewport={"width": 390, "height": 844},
                     device_scale_factor=3,
