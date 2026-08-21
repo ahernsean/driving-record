@@ -397,7 +397,7 @@
           type: response.headers.get("content-type") || "application/octet-stream",
         });
         link.textContent = `Save ${initialLabel.replace(/^Download /, "")}`;
-        setStatus(`Ready. Tap ${link.textContent} to choose where to save it.`);
+        setStatus(`Tap "${link.textContent}" above to download.`);
       } catch (error) {
         setStatus("Could not prepare the file. Please try again.");
       } finally {

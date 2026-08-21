@@ -369,7 +369,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 page.get_by_role("link", name="Save CSV backup").wait_for()
                 assert page.url == f"{url}/imports"
                 assert (
-                    "Ready. Tap Save CSV backup"
+                    'Tap "Save CSV backup" above to download.'
                     in page.locator("[data-export-status]").text_content()
                 )
                 page.get_by_role("link", name="Save CSV backup").click()
