@@ -2,7 +2,8 @@
 {% block content %}
   <h1>Imports and exports</h1>
   <section class="actions">
-    <a class="button primary" href="/csv/export">Download CSV backup</a>
+    <a class="button primary" href="/csv/export" data-file-export data-export-filename="driving-log.csv">Download CSV backup</a>
+    <span class="muted" data-export-status aria-live="polite"></span>
     <a class="button" href="/dmv">DMV driving record</a>
     {% if not is_read_only %}<a class="button secondary" href="/archives">Archives</a>{% endif %}
     {% if not is_read_only %}<form class="stacked-form" method="post" action="/csv/import" enctype="multipart/form-data" data-async-submit>

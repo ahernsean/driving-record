@@ -345,6 +345,68 @@
     });
   });
 
+  document.querySelectorAll("[data-file-export]").forEach(link => {
+    const status = link.parentElement.querySelector("[data-export-status]");
+    const filename = link.dataset.exportFilename;
+    const initialLabel = link.textContent;
+    let file;
+
+    const setStatus = message => {
+      if (status) status.textContent = message;
+    };
+
+    const saveFile = async () => {
+      if (navigator.canShare && navigator.canShare({files: [file]})) {
+        try {
+          await navigator.share({files: [file]});
+          setStatus("Save options opened.");
+        } catch (error) {
+          if (error.name !== "AbortError") {
+            setStatus("Could not open the save options. Please try again.");
+          }
+        }
+        return;
+      }
+      const download = document.createElement("a");
+      const url = URL.createObjectURL(file);
+      download.href = url;
+      download.download = filename;
+      download.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      setStatus("File download started.");
+    };
+
+    link.addEventListener("click", async event => {
+      event.preventDefault();
+      if (file) {
+        await saveFile();
+        return;
+      }
+      if (link.dataset.preparing === "yes") return;
+      link.dataset.preparing = "yes";
+      link.setAttribute("aria-busy", "true");
+      setStatus("Preparing file…");
+      try {
+        const response = await fetch(link.href, {cache: "no-store"});
+        if (response.redirected) {
+          window.location.assign(response.url);
+          return;
+        }
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        file = new File([await response.blob()], filename, {
+          type: response.headers.get("content-type") || "application/octet-stream",
+        });
+        link.textContent = `Save ${initialLabel.replace(/^Download /, "")}`;
+        setStatus(`Tap "${link.textContent}" above to download.`);
+      } catch (error) {
+        setStatus("Could not prepare the file. Please try again.");
+      } finally {
+        delete link.dataset.preparing;
+        link.removeAttribute("aria-busy");
+      }
+    });
+  });
+
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;

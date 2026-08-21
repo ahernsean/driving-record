@@ -245,6 +245,11 @@ class WebTests(unittest.TestCase):
                     self.assertEqual((await daniel.get("/dmv/export")).status_code, 200)
                     dmv_page = await daniel.get("/dmv")
                     self.assertIn("Download filled DL-4A PDF", dmv_page.text)
+                    self.assertIn(
+                        'href="/dmv/export" data-file-export '
+                        'data-export-filename="Daniel-driving-log-DL-4A.pdf"',
+                        dmv_page.text,
+                    )
                     self.assertNotIn("Add license information", dmv_page.text)
                     self.assertEqual(
                         (
@@ -536,6 +541,10 @@ class WebTests(unittest.TestCase):
                 imports = await client.get("/imports")
                 self.assertIn("Imports and exports", imports.text)
                 self.assertIn('href="/archives">Archives</a>', imports.text)
+                self.assertIn(
+                    'href="/csv/export" data-file-export data-export-filename="driving-log.csv"',
+                    imports.text,
+                )
                 csv_export = await client.get("/csv/export")
                 self.assertEqual(csv_export.status_code, 200)
                 self.assertIn("text/csv", csv_export.headers["content-type"])
