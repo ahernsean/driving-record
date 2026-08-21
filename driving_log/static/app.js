@@ -358,7 +358,7 @@
     const saveFile = async () => {
       if (navigator.canShare && navigator.canShare({files: [file]})) {
         try {
-          await navigator.share({files: [file], title: filename});
+          await navigator.share({files: [file]});
           setStatus("Save options opened.");
         } catch (error) {
           if (error.name !== "AbortError") {

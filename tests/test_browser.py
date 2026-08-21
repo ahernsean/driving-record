@@ -308,7 +308,10 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                       value: data => Array.isArray(data.files) && data.files.length === 1,
                     });
                     Object.defineProperty(navigator, "share", {
-                      value: async data => { window.sharedExportName = data.files[0].name; },
+                      value: async data => {
+                        window.sharedExportName = data.files[0].name;
+                        window.sharedExportKeys = Object.keys(data);
+                      },
                     });"""
                 )
                 page.goto(url)
@@ -371,6 +374,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 )
                 page.get_by_role("link", name="Save CSV backup").click()
                 page.wait_for_function("window.sharedExportName === 'driving-log.csv'")
+                assert page.evaluate("window.sharedExportKeys") == ["files"]
                 assert page.url == f"{url}/imports"
                 page.get_by_role("link", name="History").click()
                 filters = page.locator(".history-controls")
