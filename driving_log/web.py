@@ -808,7 +808,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             common(
                 request,
                 title="Saved locations",
-                saved_locations=locations.list_for_owner(_actor(request)),
+                saved_locations=locations.list_for_student(),
             ),
         )
 
@@ -820,7 +820,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             latitude=float(str(form["latitude"])),
             longitude=float(str(form["longitude"])),
             radius_meters=int(str(form.get("radius_meters", ""))),
-            owner_identity=_actor(request),
             request_id=str(form["request_id"]),
             actor_identity=_actor(request),
         )
@@ -831,7 +830,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         form = await read_form(request)
         locations.delete(
             location_id,
-            owner_identity=_actor(request),
             request_id=str(form["request_id"]),
             actor_identity=_actor(request),
         )
@@ -1053,7 +1051,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/live/{live_id}/end")
     async def live_end(request: Request, live_id: str) -> RedirectResponse:
         form = await read_form(request)
-        current = live.find(live_id)
+        live.find(live_id)
         suggestion = None
         latitude_text = str(form.get("end_latitude", ""))
         longitude_text = str(form.get("end_longitude", ""))
@@ -1061,7 +1059,6 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             suggestion = locations.match(
                 latitude=float(latitude_text),
                 longitude=float(longitude_text),
-                owner_identity=str(current["supervisor_name"] or _actor(request) or ""),
             )
         live.end(
             live_id,

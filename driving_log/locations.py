@@ -8,6 +8,8 @@ from typing import cast
 from driving_log.db import Database, utc_now_text
 from driving_log.records import ConflictError, NotFoundError, payload_hash
 
+STUDENT_NAME = "Daniel Ahern"
+
 
 class SavedLocationService:
     def __init__(self, database: Database):
@@ -26,13 +28,13 @@ class SavedLocationService:
             raise ValueError("location radius must be between 10 and 5,000 meters")
         return display_name, display_name.casefold(), latitude, longitude, radius_meters
 
-    def list_for_owner(self, owner_identity: str | None) -> list[sqlite3.Row]:
+    def list_for_student(self, student_name: str = STUDENT_NAME) -> list[sqlite3.Row]:
         connection = self.database.connect_readonly()
         try:
             return connection.execute(
-                "SELECT * FROM saved_locations WHERE owner_identity=? "
+                "SELECT * FROM saved_locations WHERE student_name=? "
                 "ORDER BY name COLLATE NOCASE, id",
-                (owner_identity or "",),
+                (student_name,),
             ).fetchall()
         finally:
             connection.close()
@@ -44,19 +46,18 @@ class SavedLocationService:
         latitude: float,
         longitude: float,
         radius_meters: int,
-        owner_identity: str | None,
         request_id: str,
         actor_identity: str | None,
+        student_name: str = STUDENT_NAME,
     ) -> sqlite3.Row:
         display_name, normalized, lat, lon, radius = self._validated(
             name, latitude, longitude, radius_meters
         )
-        owner = owner_identity or ""
         location_id = str(uuid.uuid4())
         digest = payload_hash(
             {
                 "action": "saved_location.create",
-                "owner": owner,
+                "student_name": student_name,
                 "name": display_name,
                 "latitude": lat,
                 "longitude": lon,
@@ -72,19 +73,22 @@ class SavedLocationService:
                 if prior["action"] != "saved_location.create" or prior["payload_hash"] != digest:
                     raise ConflictError("request ID was already used with different location data")
                 return self.get(
-                    str(prior["entity_id"]), owner_identity=owner, connection=connection
+                    str(prior["entity_id"]), student_name=student_name, connection=connection
                 )
             now = utc_now_text()
-            try:
-                connection.execute(
-                    """INSERT INTO saved_locations
-                    (id, owner_identity, name, normalized_name, latitude, longitude,
-                     radius_meters, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (location_id, owner, display_name, normalized, lat, lon, radius, now, now),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise ConflictError("a saved location already has that name") from exc
+            existing = connection.execute(
+                "SELECT 1 FROM saved_locations WHERE student_name=? AND normalized_name=?",
+                (student_name, normalized),
+            ).fetchone()
+            if existing:
+                raise ConflictError("a saved location already has that name")
+            connection.execute(
+                """INSERT INTO saved_locations
+                (id, student_name, name, normalized_name, latitude, longitude,
+                 radius_meters, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (location_id, student_name, display_name, normalized, lat, lon, radius, now, now),
+            )
             self.database.audit(
                 connection,
                 event_id=str(uuid.uuid4()),
@@ -97,20 +101,20 @@ class SavedLocationService:
                 metadata={"name": display_name, "radius_meters": radius},
                 actor_identity=actor_identity,
             )
-            return self.get(location_id, owner_identity=owner, connection=connection)
+            return self.get(location_id, student_name=student_name, connection=connection)
 
     def get(
         self,
         location_id: str,
         *,
-        owner_identity: str | None,
+        student_name: str = STUDENT_NAME,
         connection: sqlite3.Connection | None = None,
     ) -> sqlite3.Row:
         selected = connection or self.database.connect_readonly()
         try:
             row = selected.execute(
-                "SELECT * FROM saved_locations WHERE id=? AND owner_identity=?",
-                (location_id, owner_identity or ""),
+                "SELECT * FROM saved_locations WHERE id=? AND student_name=?",
+                (location_id, student_name),
             ).fetchone()
             if not row:
                 raise NotFoundError("saved location not found")
@@ -123,11 +127,10 @@ class SavedLocationService:
         self,
         location_id: str,
         *,
-        owner_identity: str | None,
         request_id: str,
         actor_identity: str | None,
+        student_name: str = STUDENT_NAME,
     ) -> None:
-        owner = owner_identity or ""
         digest = payload_hash({"action": "saved_location.delete", "location_id": location_id})
         with self.database.transaction() as connection:
             prior = connection.execute(
@@ -137,9 +140,10 @@ class SavedLocationService:
                 if prior["action"] != "saved_location.delete" or prior["payload_hash"] != digest:
                     raise ConflictError("request ID was already used for another mutation")
                 return
-            current = self.get(location_id, owner_identity=owner, connection=connection)
+            current = self.get(location_id, student_name=student_name, connection=connection)
             connection.execute(
-                "DELETE FROM saved_locations WHERE id=? AND owner_identity=?", (location_id, owner)
+                "DELETE FROM saved_locations WHERE id=? AND student_name=?",
+                (location_id, student_name),
             )
             self.database.audit(
                 connection,
@@ -154,16 +158,17 @@ class SavedLocationService:
                 actor_identity=actor_identity,
             )
 
-    def match(self, *, latitude: float, longitude: float, owner_identity: str | None) -> str | None:
+    def match(
+        self, *, latitude: float, longitude: float, student_name: str = STUDENT_NAME
+    ) -> str | None:
         if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
             raise ValueError("location coordinates are invalid")
-        owner = owner_identity or ""
         connection = self.database.connect_readonly()
         try:
             rows = connection.execute(
-                "SELECT * FROM saved_locations WHERE owner_identity IN (?, '') "
-                "ORDER BY owner_identity DESC, radius_meters ASC, name COLLATE NOCASE",
-                (owner,),
+                "SELECT * FROM saved_locations WHERE student_name=? "
+                "ORDER BY radius_meters ASC, name COLLATE NOCASE",
+                (student_name,),
             ).fetchall()
         finally:
             connection.close()
