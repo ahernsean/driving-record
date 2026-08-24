@@ -19,6 +19,7 @@
       <a href="/">Dashboard</a>
       <a href="/drives">History</a>
       <a href="/imports">Data</a>
+      {% if not is_read_only %}<a href="/locations">Locations</a>{% endif %}
     </nav>
   </header>
   <main>{% block content %}{% endblock %}</main>

@@ -410,6 +410,10 @@
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;
+      if (
+        form.matches("[data-location-create], [data-end-location]") &&
+        form.dataset.locationReady !== "yes"
+      ) return;
       event.preventDefault();
       form.dataset.submitting = "yes";
       const submitter = event.submitter;
@@ -437,6 +441,45 @@
         alert(error.message || "The request could not be completed.");
         form.dataset.submitting = "no";
         if (submitter) submitter.disabled = false;
+      }
+    });
+  });
+
+  function currentPosition() {
+    if (!navigator.geolocation) return Promise.reject(new Error("Location is not available in this browser."));
+    return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(
+      resolve,
+      reject,
+      {enableHighAccuracy: true, timeout: 5000, maximumAge: 15000}
+    ));
+  }
+
+  document.querySelectorAll("form[data-location-create], form[data-end-location]").forEach(form => {
+    form.addEventListener("submit", async event => {
+      if (form.dataset.locationReady === "yes") return;
+      event.preventDefault();
+      const status = form.querySelector("[data-location-status]");
+      const submitter = event.submitter;
+      if (submitter) submitter.disabled = true;
+      if (status) status.textContent = "Getting your current location…";
+      try {
+        const position = await currentPosition();
+        if (form.elements.end_latitude) form.elements.end_latitude.value = String(position.coords.latitude);
+        if (form.elements.end_longitude) form.elements.end_longitude.value = String(position.coords.longitude);
+        if (form.elements.latitude) form.elements.latitude.value = String(position.coords.latitude);
+        if (form.elements.longitude) form.elements.longitude.value = String(position.coords.longitude);
+        form.dataset.locationReady = "yes";
+        form.requestSubmit();
+      } catch (error) {
+        if (form.matches("[data-end-location]")) {
+          // Ending a drive must remain available when a supervisor declines location access.
+          form.dataset.locationReady = "yes";
+          form.requestSubmit();
+        } else if (status) {
+          status.textContent = "Location was not shared, so this saved location was not created.";
+        }
+      } finally {
+        if (form.dataset.locationReady !== "yes" && submitter) submitter.disabled = false;
       }
     });
   });

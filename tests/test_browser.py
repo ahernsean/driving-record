@@ -285,6 +285,8 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     device_scale_factor=3,
                     is_mobile=True,
                     has_touch=True,
+                    geolocation={"latitude": 35.7327, "longitude": -78.8503},
+                    permissions=["geolocation"],
                 )
                 page = context.new_page()
                 page.add_init_script(
@@ -305,6 +307,13 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert page.locator(".progress-label").is_visible()
                 assert page.locator(".progress-percent-value").is_visible()
                 assert page.locator(".progress-percent-caption").is_visible()
+                page.get_by_role("link", name="Locations").click()
+                page.locator('input[name="name"]').fill("Home")
+                page.locator('input[name="radius_meters"]').fill("100")
+                with page.expect_navigation():
+                    page.get_by_role("button", name="Use my current location and save").click()
+                assert page.get_by_text("Home · 100 m radius").is_visible()
+                page.get_by_role("link", name="Dashboard").click()
                 page.locator(".progress-percent-value").evaluate(
                     "element => { element.textContent = '108%'; }"
                 )
@@ -403,6 +412,8 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     viewport={"width": 320, "height": 568},
                     is_mobile=True,
                     has_touch=True,
+                    geolocation={"latitude": 35.7327, "longitude": -78.8503},
+                    permissions=["geolocation"],
                 )
                 recovered = fresh.new_page()
                 recurring_requests: list[str] = []
@@ -424,6 +435,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert overflow <= 0
                 recovered.get_by_role("button", name="End drive").click()
                 recovered.get_by_text("Drive ended.").wait_for()
+                assert recovered.locator('input[name="end_location"]').input_value() == "Home"
                 start_input = recovered.locator('input[name="started_at_local"]')
                 end_input = recovered.locator('input[name="ended_at_local"]')
                 duration_minutes = recovered.locator("[data-duration-minutes]")

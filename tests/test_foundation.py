@@ -19,8 +19,10 @@ from driving_log.auth import Authenticator, _encode, password_hash, verify_passw
 from driving_log.cli import doctor, main
 from driving_log.config import Settings
 from driving_log.db import BUSY_TIMEOUT_MS, Database, MigrationMismatchError, SchemaTooNewError
+from driving_log.locations import SavedLocationService
 from driving_log.logging_config import JsonFormatter
 from driving_log.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS, SCHEMA_V1
+from driving_log.records import ConflictError, NotFoundError
 from driving_log.solar import (
     AmbiguousLocalTimeError,
     LocalTimeError,
@@ -105,6 +107,114 @@ class DatabaseTests(unittest.TestCase):
             sidecar = self.path.with_name(f"{self.path.name}{suffix}")
             if sidecar.exists():
                 self.assertEqual(sidecar.stat().st_mode & 0o777, 0o600)
+
+    def test_saved_locations_match_within_their_configured_radius(self) -> None:
+        database = Database(self.path)
+        database.initialize()
+        locations = SavedLocationService(database)
+        created = locations.create(
+            name="Home",
+            latitude=35.7327,
+            longitude=-78.8503,
+            radius_meters=100,
+            owner_identity="Sean Ahern",
+            request_id="location-create",
+            actor_identity="Sean Ahern",
+        )
+        self.assertEqual(created["name"], "Home")
+        self.assertEqual(
+            locations.match(
+                latitude=35.7329,
+                longitude=-78.8503,
+                owner_identity="Sean Ahern",
+            ),
+            "Home",
+        )
+        self.assertIsNone(
+            locations.match(
+                latitude=35.7327,
+                longitude=-78.8503,
+                owner_identity="Bethany O'Banion",
+            )
+        )
+        self.assertIsNone(
+            locations.match(
+                latitude=35.7427,
+                longitude=-78.8503,
+                owner_identity="Sean Ahern",
+            )
+        )
+
+    def test_saved_location_validation_idempotency_and_deletion(self) -> None:
+        database = Database(self.path)
+        database.initialize()
+        locations = SavedLocationService(database)
+        for kwargs, message in (
+            ({"name": "", "latitude": 0.0, "longitude": 0.0, "radius_meters": 100}, "name"),
+            (
+                {"name": "Home", "latitude": 91.0, "longitude": 0.0, "radius_meters": 100},
+                "coordinates",
+            ),
+            ({"name": "Home", "latitude": 0.0, "longitude": 0.0, "radius_meters": 9}, "radius"),
+        ):
+            with self.assertRaisesRegex(ValueError, message):
+                locations.create(
+                    **kwargs,
+                    owner_identity="Sean Ahern",
+                    request_id=str(kwargs),
+                    actor_identity="Sean Ahern",
+                )
+        created = locations.create(
+            name="  School  ",
+            latitude=35.0,
+            longitude=-78.0,
+            radius_meters=200,
+            owner_identity="Sean Ahern",
+            request_id="create-school",
+            actor_identity="Sean Ahern",
+        )
+        self.assertEqual(
+            [row["name"] for row in locations.list_for_owner("Sean Ahern")], ["School"]
+        )
+        self.assertEqual(
+            locations.create(
+                name="School",
+                latitude=35.0,
+                longitude=-78.0,
+                radius_meters=200,
+                owner_identity="Sean Ahern",
+                request_id="create-school",
+                actor_identity="Sean Ahern",
+            )["id"],
+            created["id"],
+        )
+        with self.assertRaises(ConflictError):
+            locations.create(
+                name="School",
+                latitude=35.0,
+                longitude=-78.0,
+                radius_meters=200,
+                owner_identity="Sean Ahern",
+                request_id="different-request",
+                actor_identity="Sean Ahern",
+            )
+        with self.assertRaises(NotFoundError):
+            locations.get(created["id"], owner_identity="Bethany O'Banion")
+        with self.assertRaisesRegex(ValueError, "coordinates"):
+            locations.match(latitude=100.0, longitude=0.0, owner_identity="Sean Ahern")
+        locations.delete(
+            created["id"],
+            owner_identity="Sean Ahern",
+            request_id="delete-school",
+            actor_identity="Sean Ahern",
+        )
+        locations.delete(
+            created["id"],
+            owner_identity="Sean Ahern",
+            request_id="delete-school",
+            actor_identity="Sean Ahern",
+        )
+        self.assertEqual(locations.list_for_owner("Sean Ahern"), [])
 
     def test_migrates_v1_drives_with_blank_end_locations(self) -> None:
         self.path.parent.mkdir(parents=True)

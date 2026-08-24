@@ -7,7 +7,7 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
@@ -24,6 +24,7 @@ from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
 from driving_log.dmv import DmvExportService, SupervisorProfileService, mask_license
 from driving_log.live import MINIMUM_DRIVE_SECONDS, LiveDriveService
+from driving_log.locations import SavedLocationService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.solar import apex_daylight_window, resolve_local
 
@@ -110,7 +111,7 @@ GROUP_BY_OPTIONS = (
     ("duration", "Duration"),
 )
 AUTH_SUPERVISORS = (ACCOUNTS["sean"], ACCOUNTS["jen"], ACCOUNTS["bethany"])
-MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives"})
+MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives", "/locations"})
 
 
 def _part_of_day(value: str | datetime, timezone_name: str) -> str:
@@ -267,6 +268,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     records = RecordService(database)
     live = LiveDriveService(database)
     profiles = SupervisorProfileService(database)
+    locations = SavedLocationService(database)
     dmv = DmvExportService(database)
     authenticator = Authenticator(
         settings.sean_password_hash,
@@ -798,6 +800,43 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             if row["id"] != exclude_drive_id
         ]
 
+    @app.get("/locations", response_class=HTMLResponse)
+    async def saved_locations_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "locations.html",
+            common(
+                request,
+                title="Saved locations",
+                saved_locations=locations.list_for_owner(_actor(request)),
+            ),
+        )
+
+    @app.post("/locations")
+    async def saved_location_create(request: Request) -> RedirectResponse:
+        form = await read_form(request)
+        locations.create(
+            name=str(form.get("name", "")),
+            latitude=float(str(form["latitude"])),
+            longitude=float(str(form["longitude"])),
+            radius_meters=int(str(form.get("radius_meters", ""))),
+            owner_identity=_actor(request),
+            request_id=str(form["request_id"]),
+            actor_identity=_actor(request),
+        )
+        return redirect("/locations")
+
+    @app.post("/locations/{location_id}/delete")
+    async def saved_location_delete(request: Request, location_id: str) -> RedirectResponse:
+        form = await read_form(request)
+        locations.delete(
+            location_id,
+            owner_identity=_actor(request),
+            request_id=str(form["request_id"]),
+            actor_identity=_actor(request),
+        )
+        return redirect("/locations")
+
     @app.get("/drives/new", response_class=HTMLResponse)
     async def drive_new(request: Request) -> HTMLResponse:
         now = datetime.now(ZONE).replace(second=0, microsecond=0)
@@ -990,6 +1029,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 title="Live drive",
                 live=open_drive,
                 supervisor_options=AUTH_SUPERVISORS,
+                location_suggestion=request.query_params.get("location_suggestion", ""),
                 **time_values,
             ),
         )
@@ -1013,12 +1053,23 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/live/{live_id}/end")
     async def live_end(request: Request, live_id: str) -> RedirectResponse:
         form = await read_form(request)
+        current = live.find(live_id)
+        suggestion = None
+        latitude_text = str(form.get("end_latitude", ""))
+        longitude_text = str(form.get("end_longitude", ""))
+        if latitude_text and longitude_text:
+            suggestion = locations.match(
+                latitude=float(latitude_text),
+                longitude=float(longitude_text),
+                owner_identity=str(current["supervisor_name"] or _actor(request) or ""),
+            )
         live.end(
             live_id,
             request_id=str(form["request_id"]),
             actor_identity=_actor(request),
         )
-        return redirect("/live")
+        suffix = f"?{urlencode({'location_suggestion': suggestion})}" if suggestion else ""
+        return redirect(f"/live{suffix}")
 
     @app.post("/live/{live_id}/resume")
     async def live_resume(request: Request, live_id: str) -> RedirectResponse:

@@ -203,6 +203,7 @@ fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; border: 1p
 .field-note, .empty { color: var(--muted); font-weight: 400; }
 .detail-card { display: grid; gap: 1rem; }
 .detail-card div { display: grid; gap: .2rem; overflow-wrap: anywhere; }
+.saved-location { grid-template-columns: 1fr auto; align-items: center; }
 .warning-card { background: var(--warning); margin: 1rem 0; }
 .live-banner {
   display: block; padding: .9rem; border-radius: .8rem; background: var(--accent);
