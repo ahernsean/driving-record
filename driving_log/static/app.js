@@ -454,6 +454,40 @@
     ));
   }
 
+  function showLocationPreview(form, position) {
+    if (!window.L) throw new Error("The map preview could not load.");
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+    const preview = form.querySelector("[data-location-preview]");
+    const container = form.querySelector("[data-location-map]");
+    const radiusInput = form.elements.radius_meters;
+    const accuracy = form.querySelector("[data-location-accuracy]");
+    if (!preview || !container || !radiusInput || !accuracy) throw new Error("The map preview is unavailable.");
+    preview.hidden = false;
+    container.replaceChildren();
+    const map = L.map(container, {scrollWheelZoom: false});
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+      maxZoom: 19,
+    }).addTo(map);
+    const marker = L.marker([latitude, longitude], {draggable: true}).addTo(map);
+    const circle = L.circle([latitude, longitude], {radius: Number(radiusInput.value)}).addTo(map);
+    const updateCoordinates = latlng => {
+      form.elements.latitude.value = String(latlng.lat);
+      form.elements.longitude.value = String(latlng.lng);
+      circle.setLatLng(latlng);
+    };
+    marker.on("drag", event => updateCoordinates(event.target.getLatLng()));
+    radiusInput.addEventListener("input", () => {
+      const radius = Number(radiusInput.value);
+      if (Number.isFinite(radius) && radius > 0) circle.setRadius(radius);
+    });
+    updateCoordinates(marker.getLatLng());
+    accuracy.textContent = `Device accuracy is approximately ${Math.round(position.coords.accuracy)} meters.`;
+    map.fitBounds(circle.getBounds(), {padding: [20, 20], maxZoom: 17});
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+
   document.querySelectorAll("form[data-location-create], form[data-end-location]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (form.dataset.locationReady === "yes") return;
@@ -464,12 +498,15 @@
       if (status) status.textContent = "Getting your current location…";
       try {
         const position = await currentPosition();
-        if (form.elements.end_latitude) form.elements.end_latitude.value = String(position.coords.latitude);
-        if (form.elements.end_longitude) form.elements.end_longitude.value = String(position.coords.longitude);
-        if (form.elements.latitude) form.elements.latitude.value = String(position.coords.latitude);
-        if (form.elements.longitude) form.elements.longitude.value = String(position.coords.longitude);
-        form.dataset.locationReady = "yes";
-        form.requestSubmit();
+        if (form.matches("[data-location-create]")) {
+          showLocationPreview(form, position);
+          if (status) status.textContent = "Check the pin and circle, then save this location.";
+        } else {
+          if (form.elements.end_latitude) form.elements.end_latitude.value = String(position.coords.latitude);
+          if (form.elements.end_longitude) form.elements.end_longitude.value = String(position.coords.longitude);
+          form.dataset.locationReady = "yes";
+          form.requestSubmit();
+        }
       } catch (error) {
         if (form.matches("[data-end-location]")) {
           // Ending a drive must remain available when a supervisor declines location access.
@@ -481,6 +518,12 @@
       } finally {
         if (form.dataset.locationReady !== "yes" && submitter) submitter.disabled = false;
       }
+    });
+  });
+
+  document.querySelectorAll("[data-location-save]").forEach(button => {
+    button.addEventListener("click", () => {
+      button.form.dataset.locationReady = "yes";
     });
   });
 })();

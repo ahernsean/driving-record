@@ -310,8 +310,11 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 page.get_by_role("link", name="Locations").click()
                 page.locator('input[name="name"]').fill("Home")
                 page.locator('input[name="radius_meters"]').fill("100")
+                page.get_by_role("button", name="Use my current location").click()
+                page.locator("[data-location-map].leaflet-container").wait_for()
+                assert page.locator("[data-location-map]").is_visible()
                 with page.expect_navigation():
-                    page.get_by_role("button", name="Use my current location and save").click()
+                    page.get_by_role("button", name="Save this location").click()
                 assert page.get_by_text("Home · 100 m radius").is_visible()
                 page.get_by_role("link", name="Dashboard").click()
                 page.locator(".progress-percent-value").evaluate(

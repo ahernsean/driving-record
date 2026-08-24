@@ -262,7 +262,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
     asset_digest = hashlib.sha256()
-    for asset_name in ("app.css", "app.js"):
+    for asset_name in ("app.css", "app.js", "leaflet/leaflet.css", "leaflet/leaflet.js"):
         asset_digest.update((PACKAGE_DIR / "static" / asset_name).read_bytes())
     asset_version = asset_digest.hexdigest()[:12]
     records = RecordService(database)

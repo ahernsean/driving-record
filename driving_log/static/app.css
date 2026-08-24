@@ -204,6 +204,11 @@ fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; border: 1p
 .detail-card { display: grid; gap: 1rem; }
 .detail-card div { display: grid; gap: .2rem; overflow-wrap: anywhere; }
 .saved-location { grid-template-columns: 1fr auto; align-items: center; }
+.location-preview { display: grid; gap: .75rem; }
+.location-preview h2 { margin: 0; }
+.location-map { min-height: 20rem; border: 1px solid var(--border); border-radius: 1rem; overflow: hidden; }
+.leaflet-container { font: inherit; }
+.leaflet-control-attribution { font-size: .65rem; }
 .warning-card { background: var(--warning); margin: 1rem 0; }
 .live-banner {
   display: block; padding: .9rem; border-radius: .8rem; background: var(--accent);

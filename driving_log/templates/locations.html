@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% block head_extra %}
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css?v={{ asset_version }}">
+  <script src="/static/leaflet/leaflet.js?v={{ asset_version }}"></script>
+{% endblock %}
 {% block content %}
   <h1>Saved locations</h1>
   <p class="field-note">Save places such as Home or School. Your device location is used only to set up a place or to suggest an end location; it is never stored with a drive.</p>
@@ -9,8 +13,15 @@
     <label>Location name<input required maxlength="100" name="name" placeholder="For example, Home"></label>
     <label>Match radius (meters)<input required type="number" min="10" max="5000" step="1" name="radius_meters" value="100"></label>
     <p class="field-note">A 100-meter radius is a good starting point for a home, school, or parking lot.</p>
-    <button class="primary" type="submit">Use my current location and save</button>
+    <button class="primary" type="submit" data-location-capture>Use my current location</button>
     <p class="field-note" data-location-status aria-live="polite"></p>
+    <section class="location-preview" data-location-preview hidden aria-label="Location preview">
+      <h2>Preview location</h2>
+      <p class="field-note">Drag the pin or adjust the radius until the circle covers the place you mean.</p>
+      <div class="location-map" data-location-map></div>
+      <p class="field-note" data-location-accuracy></p>
+      <button class="primary" type="submit" data-location-save>Save this location</button>
+    </section>
   </form>
   {% if saved_locations %}
     <section class="detail-card" aria-label="Configured saved locations">

@@ -35,7 +35,7 @@ driving-log = "driving_log.cli:main"
 include = ["driving_log*"]
 
 [tool.setuptools.package-data]
-driving_log = ["assets/*.pdf", "templates/*.html", "static/*"]
+driving_log = ["assets/*.pdf", "templates/*.html", "static/*", "static/leaflet/*", "static/leaflet/images/*"]
 
 [tool.ruff]
 line-length = 100
