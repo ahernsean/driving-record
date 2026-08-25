@@ -17,10 +17,13 @@
     <p class="field-note" data-location-status aria-live="polite"></p>
     <section class="location-preview" data-location-preview hidden aria-label="Location preview">
       <h2>Preview location</h2>
-      <p class="field-note">Drag the pin or adjust the radius until the circle covers the place you mean.</p>
+      <p class="field-note">Tap the map to move the marker, or adjust the radius until the circle covers the place you mean.</p>
       <div class="location-map" data-location-map></div>
       <p class="field-note" data-location-accuracy></p>
-      <button class="primary" type="submit" data-location-save>Save this location</button>
+      <div class="location-preview-actions">
+        <button class="primary" type="submit" data-location-save>Save this location</button>
+        <a class="button" href="/">Cancel</a>
+      </div>
     </section>
   </form>
   {% if saved_locations %}

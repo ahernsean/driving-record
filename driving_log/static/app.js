@@ -470,21 +470,28 @@
       attribution: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
       maxZoom: 19,
     }).addTo(map);
-    const marker = L.marker([latitude, longitude], {draggable: true}).addTo(map);
+    const marker = L.circleMarker([latitude, longitude], {
+      radius: 9,
+      color: "#1769e0",
+      fillColor: "#1769e0",
+      fillOpacity: 1,
+      weight: 2,
+    }).addTo(map);
     const circle = L.circle([latitude, longitude], {radius: Number(radiusInput.value)}).addTo(map);
     const updateCoordinates = latlng => {
       form.elements.latitude.value = String(latlng.lat);
       form.elements.longitude.value = String(latlng.lng);
+      marker.setLatLng(latlng);
       circle.setLatLng(latlng);
     };
-    marker.on("drag", event => updateCoordinates(event.target.getLatLng()));
+    map.on("click", event => updateCoordinates(event.latlng));
     radiusInput.addEventListener("input", () => {
       const radius = Number(radiusInput.value);
       if (Number.isFinite(radius) && radius > 0) circle.setRadius(radius);
     });
     updateCoordinates(marker.getLatLng());
     accuracy.textContent = `Device accuracy is approximately ${Math.round(position.coords.accuracy)} meters.`;
-    map.fitBounds(circle.getBounds(), {padding: [20, 20], maxZoom: 17});
+    map.setView([latitude, longitude], 17);
     setTimeout(() => map.invalidateSize(), 0);
   }
 
@@ -499,8 +506,14 @@
       try {
         const position = await currentPosition();
         if (form.matches("[data-location-create]")) {
-          showLocationPreview(form, position);
-          if (status) status.textContent = "Check the pin and circle, then save this location.";
+          try {
+            showLocationPreview(form, position);
+            if (status) status.textContent = "Check the pin and circle, then save this location.";
+          } catch (error) {
+            const preview = form.querySelector("[data-location-preview]");
+            if (preview) preview.hidden = true;
+            if (status) status.textContent = "Your location was found, but the map preview could not load. Please try again.";
+          }
         } else {
           if (form.elements.end_latitude) form.elements.end_latitude.value = String(position.coords.latitude);
           if (form.elements.end_longitude) form.elements.end_longitude.value = String(position.coords.longitude);

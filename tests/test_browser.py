@@ -313,6 +313,13 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 page.get_by_role("button", name="Use my current location").click()
                 page.locator("[data-location-map].leaflet-container").wait_for()
                 assert page.locator("[data-location-map]").is_visible()
+                assert (
+                    "Check the pin and circle"
+                    in page.locator("[data-location-status]").text_content()
+                )
+                map_html = page.locator("[data-location-map]").inner_html()
+                assert "leaflet-interactive" in map_html, map_html
+                assert page.get_by_role("link", name="Cancel").is_visible()
                 with page.expect_navigation():
                     page.get_by_role("button", name="Save this location").click()
                 assert page.get_by_text("Home · 100 m radius").is_visible()
