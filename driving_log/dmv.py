@@ -93,22 +93,6 @@ class SupervisorProfileService:
         connection.close()
         return rows
 
-    def distinct_drive_names(self) -> list[str]:
-        connection = self.database.connect_readonly()
-        rows = connection.execute(
-            """
-            SELECT supervisor_name
-            FROM drives
-            WHERE deleted_at IS NULL
-              AND supervisor_name IS NOT NULL
-              AND trim(supervisor_name) <> ''
-            GROUP BY supervisor_name COLLATE NOCASE
-            ORDER BY supervisor_name COLLATE NOCASE
-            """
-        ).fetchall()
-        connection.close()
-        return [str(row["supervisor_name"]) for row in rows]
-
     def get(self, profile_id: str, connection: sqlite3.Connection | None = None) -> sqlite3.Row:
         owned = connection is None
         selected = connection or self.database.connect_readonly()

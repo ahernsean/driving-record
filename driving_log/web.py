@@ -1239,7 +1239,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 request,
                 title="DMV driving record",
                 profiles=stored_profiles,
-                drive_supervisors=profiles.distinct_drive_names(),
+                supervisor_options=AUTH_SUPERVISORS,
                 review=dmv.review(),
             ),
         )
