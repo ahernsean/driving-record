@@ -459,7 +459,7 @@
     const {latitude, longitude, accuracyMeters} = location;
     const preview = form.querySelector("[data-location-preview]");
     const container = form.querySelector("[data-location-map]");
-    const radiusInput = form.elements.radius_meters;
+    const radiusInput = form.elements.radius_feet;
     const accuracy = form.querySelector("[data-location-accuracy]");
     if (!preview || !container || !radiusInput || !accuracy) throw new Error("The map preview is unavailable.");
     if (form.locationPreviewMap) form.locationPreviewMap.remove();
@@ -472,12 +472,13 @@
       maxZoom: 19,
     }).addTo(map);
     const marker = L.marker([latitude, longitude], {draggable: true}).addTo(map);
-    const circle = L.circle([latitude, longitude], {radius: Number(radiusInput.value)}).addTo(map);
+    const metersPerFoot = 0.3048;
+    const circle = L.circle([latitude, longitude], {radius: Number(radiusInput.value) * metersPerFoot}).addTo(map);
     const radiusHandle = L.marker([latitude, longitude], {
       draggable: true,
       icon: L.divIcon({className: "location-radius-handle", iconSize: [20, 20]}),
     }).addTo(map);
-    const clampRadius = value => Math.max(10, Math.min(5000, Math.round(value)));
+    const clampRadius = value => Math.max(33, Math.min(16404, Math.round(value)));
     const radiusHandlePosition = (latlng, radius) => {
       const latitudeRadians = latlng.lat * Math.PI / 180;
       const longitudeDelta = radius / (111_320 * Math.max(Math.cos(latitudeRadians), 0.01));
@@ -492,11 +493,12 @@
         * Math.sin(longitudeDelta / 2) ** 2;
       return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
-    const updateRadius = radius => {
-      const selectedRadius = clampRadius(radius);
-      radiusInput.value = String(selectedRadius);
-      circle.setRadius(selectedRadius);
-      radiusHandle.setLatLng(radiusHandlePosition(marker.getLatLng(), selectedRadius));
+    const updateRadius = feet => {
+      const selectedFeet = clampRadius(feet);
+      const selectedMeters = selectedFeet * metersPerFoot;
+      radiusInput.value = String(selectedFeet);
+      circle.setRadius(selectedMeters);
+      radiusHandle.setLatLng(radiusHandlePosition(marker.getLatLng(), selectedMeters));
     };
     const updateCoordinates = latlng => {
       form.elements.latitude.value = String(latlng.lat);
@@ -507,7 +509,7 @@
     };
     map.on("click", event => updateCoordinates(event.latlng));
     marker.on("drag", event => updateCoordinates(event.target.getLatLng()));
-    radiusHandle.on("drag", event => updateRadius(distanceMeters(marker.getLatLng(), event.target.getLatLng())));
+    radiusHandle.on("drag", event => updateRadius(distanceMeters(marker.getLatLng(), event.target.getLatLng()) / metersPerFoot));
     radiusInput.oninput = () => {
       const radius = Number(radiusInput.value);
       if (Number.isFinite(radius) && radius > 0) updateRadius(radius);
@@ -515,7 +517,7 @@
     updateCoordinates(marker.getLatLng());
     form.locationPreviewMarkers = {center: marker, radius: radiusHandle};
     if (accuracyMeters !== undefined) {
-      accuracy.textContent = `Device accuracy is approximately ${Math.round(accuracyMeters)} meters.`;
+      accuracy.textContent = `Device accuracy is approximately ${Math.round(accuracyMeters / metersPerFoot)} feet.`;
     }
     map.setView([latitude, longitude], 17);
     setTimeout(() => map.invalidateSize(), 0);

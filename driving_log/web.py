@@ -30,6 +30,7 @@ from driving_log.solar import apex_daylight_window, resolve_local
 
 PACKAGE_DIR = Path(__file__).parent
 ZONE = ZoneInfo("America/New_York")
+METERS_PER_FOOT = 0.3048
 
 
 def _parse_local(value: str, fold_text: str | None = None) -> datetime:
@@ -40,6 +41,14 @@ def _parse_local(value: str, fold_text: str | None = None) -> datetime:
 
 def _format_minutes(minutes: int) -> str:
     return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def _feet_from_meters(meters: int | float) -> int:
+    return round(float(meters) / METERS_PER_FOOT)
+
+
+def _meters_from_feet(feet: int) -> int:
+    return round(feet * METERS_PER_FOOT)
 
 
 def _local_datetime(value: str | datetime) -> datetime:
@@ -319,6 +328,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         return {
             "request": request,
             "format_minutes": _format_minutes,
+            "feet_from_meters": _feet_from_meters,
             "format_local_datetime": _format_local_datetime,
             "format_local_date": _format_local_date,
             "asset_version": asset_version,
@@ -821,7 +831,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             name=str(form.get("name", "")),
             latitude=float(str(form["latitude"])),
             longitude=float(str(form["longitude"])),
-            radius_meters=int(str(form.get("radius_meters", ""))),
+            radius_meters=_meters_from_feet(int(str(form.get("radius_feet", "")))),
             request_id=str(form["request_id"]),
             actor_identity=_actor(request),
         )
@@ -857,7 +867,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             name=str(form.get("name", "")),
             latitude=float(str(form["latitude"])),
             longitude=float(str(form["longitude"])),
-            radius_meters=int(str(form.get("radius_meters", ""))),
+            radius_meters=_meters_from_feet(int(str(form.get("radius_feet", "")))),
             request_id=str(form["request_id"]),
             actor_identity=_actor(request),
         )

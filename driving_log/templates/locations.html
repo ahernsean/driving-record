@@ -11,8 +11,8 @@
     <input type="hidden" name="latitude">
     <input type="hidden" name="longitude">
     <label>Location name<input required maxlength="100" name="name" placeholder="For example, Home"></label>
-    <label>Match radius (meters)<input required type="number" min="10" max="5000" step="1" name="radius_meters" value="100"></label>
-    <p class="field-note">A 100-meter radius is a good starting point for a home, school, or parking lot.</p>
+    <label>Match radius (feet)<input required type="number" min="33" max="16404" step="1" name="radius_feet" value="328"></label>
+    <p class="field-note">A 330-foot radius is a good starting point for a home, school, or parking lot.</p>
     <button class="primary" type="submit" data-location-capture>Use my current location</button>
     <p class="field-note" data-location-status aria-live="polite"></p>
     <section class="location-preview" data-location-preview hidden aria-label="Location preview">
@@ -31,7 +31,7 @@
       <h2>Configured locations</h2>
       {% for location in saved_locations %}
         <div class="saved-location">
-          <span>{{ location.name }} · {{ location.radius_meters }} m radius</span>
+          <span>{{ location.name }} · {{ feet_from_meters(location.radius_meters) }} ft radius</span>
           <a class="button compact" href="/locations/{{ location.id }}/edit">Edit</a>
           <form method="post" action="/locations/{{ location.id }}/delete" onsubmit="return confirm('Delete {{ location.name }}?')">
             <input type="hidden" name="request_id" value="{{ '90000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">

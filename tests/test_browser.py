@@ -309,7 +309,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert page.locator(".progress-percent-caption").is_visible()
                 page.get_by_role("link", name="Locations").click()
                 page.locator('input[name="name"]').fill("Home")
-                page.locator('input[name="radius_meters"]').fill("100")
+                page.locator('input[name="radius_feet"]').fill("328")
                 page.get_by_role("button", name="Use my current location").click()
                 page.locator("[data-location-map].leaflet-container").wait_for()
                 assert page.locator("[data-location-map]").is_visible()
@@ -320,7 +320,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 map_html = page.locator("[data-location-map]").inner_html()
                 assert "leaflet-interactive" in map_html, map_html
                 assert page.get_by_role("link", name="Cancel").is_visible()
-                page.locator('input[name="radius_meters"]').fill("150")
+                page.locator('input[name="radius_feet"]').fill("492")
                 assert page.locator("[data-location-map]").is_visible()
                 page.get_by_role("button", name="Use my current location").click()
                 page.wait_for_function(
@@ -330,7 +330,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert page.locator("[data-location-map]").is_visible()
                 with page.expect_navigation():
                     page.get_by_role("button", name="Save this location").click()
-                assert page.get_by_text("Home · 150 m radius").is_visible()
+                assert page.get_by_text("Home · 492 ft radius").is_visible()
                 page.get_by_role("link", name="Edit").click()
                 page.locator("[data-location-map].leaflet-container").wait_for()
                 page.locator("[data-location-edit]").evaluate(
@@ -343,7 +343,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     }"""
                 )
                 assert page.locator('input[name="latitude"]').input_value() == "35.733"
-                assert page.locator('input[name="radius_meters"]').input_value() != "150"
+                assert page.locator('input[name="radius_feet"]').input_value() != "492"
                 page.get_by_role("link", name="Cancel").click()
                 page.get_by_role("link", name="Dashboard").click()
                 page.locator(".progress-percent-value").evaluate(
