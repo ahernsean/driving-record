@@ -157,9 +157,51 @@ CREATE TABLE supervisor_profiles (
 );
 """
 
+SCHEMA_V4 = """
+CREATE TABLE saved_locations (
+    id TEXT PRIMARY KEY,
+    owner_identity TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    latitude REAL NOT NULL CHECK (latitude >= -90 AND latitude <= 90),
+    longitude REAL NOT NULL CHECK (longitude >= -180 AND longitude <= 180),
+    radius_meters INTEGER NOT NULL CHECK (radius_meters BETWEEN 10 AND 5000),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(owner_identity, normalized_name)
+);
+CREATE INDEX saved_locations_owner_idx ON saved_locations(owner_identity, name COLLATE NOCASE);
+"""
+
+SCHEMA_V5 = """
+CREATE TABLE saved_locations_by_student (
+    id TEXT PRIMARY KEY,
+    student_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    latitude REAL NOT NULL CHECK (latitude >= -90 AND latitude <= 90),
+    longitude REAL NOT NULL CHECK (longitude >= -180 AND longitude <= 180),
+    radius_meters INTEGER NOT NULL CHECK (radius_meters BETWEEN 10 AND 5000),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+INSERT INTO saved_locations_by_student
+    (id, student_name, name, normalized_name, latitude, longitude, radius_meters,
+     created_at, updated_at)
+SELECT id, 'Daniel Ahern', name, normalized_name, latitude, longitude, radius_meters,
+       created_at, updated_at
+FROM saved_locations;
+DROP TABLE saved_locations;
+ALTER TABLE saved_locations_by_student RENAME TO saved_locations;
+CREATE INDEX saved_locations_student_idx
+ON saved_locations(student_name, name COLLATE NOCASE);
+"""
+
 MIGRATIONS = (
     Migration(1, "initial_schema", SCHEMA_V1),
     Migration(2, "drive_end_location", SCHEMA_V2),
     Migration(3, "supervisor_profiles", SCHEMA_V3),
+    Migration(4, "saved_locations", SCHEMA_V4),
+    Migration(5, "saved_locations_by_student", SCHEMA_V5),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

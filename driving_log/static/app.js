@@ -410,6 +410,10 @@
   document.querySelectorAll("form[data-async-submit]").forEach(form => {
     form.addEventListener("submit", async event => {
       if (event.defaultPrevented || form.dataset.submitting === "yes") return;
+      if (
+        form.matches("[data-location-create], [data-end-location]") &&
+        form.dataset.locationReady !== "yes"
+      ) return;
       event.preventDefault();
       form.dataset.submitting = "yes";
       const submitter = event.submitter;
@@ -437,6 +441,208 @@
         alert(error.message || "The request could not be completed.");
         form.dataset.submitting = "no";
         if (submitter) submitter.disabled = false;
+      }
+    });
+  });
+
+  function currentPosition() {
+    if (!navigator.geolocation) return Promise.reject(new Error("Location is not available in this browser."));
+    return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(
+      resolve,
+      reject,
+      {enableHighAccuracy: true, timeout: 5000, maximumAge: 15000}
+    ));
+  }
+
+  function showLocationPreview(form, location) {
+    if (!window.L) throw new Error("The map preview could not load.");
+    const {latitude, longitude, accuracyMeters} = location;
+    const preview = form.querySelector("[data-location-preview]");
+    const container = form.querySelector("[data-location-map]");
+    const radiusInput = form.elements.radius_feet;
+    const accuracy = form.querySelector("[data-location-accuracy]");
+    if (!preview || !container || !radiusInput || !accuracy) throw new Error("The map preview is unavailable.");
+    if (form.locationPreviewMap) form.locationPreviewMap.remove();
+    preview.hidden = false;
+    container.replaceChildren();
+    const map = L.map(container, {scrollWheelZoom: false});
+    form.locationPreviewMap = map;
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+      maxZoom: 19,
+    }).addTo(map);
+    const marker = L.marker([latitude, longitude], {
+      draggable: true,
+      icon: L.divIcon({className: "location-center-dot", iconSize: [24, 24], iconAnchor: [12, 12]}),
+    }).addTo(map);
+    const metersPerFoot = 0.3048;
+    const circle = L.circle([latitude, longitude], {radius: Number(radiusInput.value) * metersPerFoot}).addTo(map);
+    const radiusHandle = L.marker([latitude, longitude], {
+      draggable: true,
+      icon: L.divIcon({className: "location-radius-handle", iconSize: [20, 20]}),
+    }).addTo(map);
+    const clampRadius = value => Math.max(40, Math.min(16400, Math.round(value / 10) * 10));
+    const radiusHandlePosition = (latlng, radius) => {
+      const latitudeRadians = latlng.lat * Math.PI / 180;
+      const longitudeDelta = radius / (111_320 * Math.max(Math.cos(latitudeRadians), 0.01));
+      return L.latLng(latlng.lat, latlng.lng + longitudeDelta);
+    };
+    const distanceMeters = (first, second) => {
+      const radians = Math.PI / 180;
+      const latitudeDelta = (second.lat - first.lat) * radians;
+      const longitudeDelta = (second.lng - first.lng) * radians;
+      const a = Math.sin(latitudeDelta / 2) ** 2
+        + Math.cos(first.lat * radians) * Math.cos(second.lat * radians)
+        * Math.sin(longitudeDelta / 2) ** 2;
+      return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+    const updateRadius = feet => {
+      const selectedFeet = clampRadius(feet);
+      const selectedMeters = selectedFeet * metersPerFoot;
+      radiusInput.value = String(selectedFeet);
+      circle.setRadius(selectedMeters);
+      radiusHandle.setLatLng(radiusHandlePosition(marker.getLatLng(), selectedMeters));
+    };
+    const updateCoordinates = latlng => {
+      form.elements.latitude.value = String(latlng.lat);
+      form.elements.longitude.value = String(latlng.lng);
+      marker.setLatLng(latlng);
+      circle.setLatLng(latlng);
+      updateRadius(Number(radiusInput.value));
+    };
+    map.on("click", event => updateCoordinates(event.latlng));
+    marker.on("drag", event => updateCoordinates(event.target.getLatLng()));
+    radiusHandle.on("drag", event => updateRadius(distanceMeters(marker.getLatLng(), event.target.getLatLng()) / metersPerFoot));
+    radiusInput.oninput = () => {
+      const radius = Number(radiusInput.value);
+      if (Number.isFinite(radius) && radius > 0) updateRadius(radius);
+    };
+    updateCoordinates(marker.getLatLng());
+    form.locationPreviewMarkers = {center: marker, radius: radiusHandle};
+    if (accuracyMeters !== undefined) {
+      accuracy.textContent = `Device accuracy is approximately ${Math.round(accuracyMeters / metersPerFoot)} feet.`;
+    }
+    map.setView([latitude, longitude], 17);
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+
+  document.querySelectorAll("form[data-location-create], form[data-end-location]").forEach(form => {
+    form.addEventListener("submit", async event => {
+      if (form.dataset.locationReady === "yes") return;
+      event.preventDefault();
+      const status = form.querySelector("[data-location-status]");
+      const submitter = event.submitter;
+      if (submitter) submitter.disabled = true;
+      if (status) status.textContent = "Getting your current location…";
+      try {
+        const position = await currentPosition();
+        if (form.matches("[data-location-create]")) {
+          try {
+            showLocationPreview(form, {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracyMeters: position.coords.accuracy,
+            });
+            if (status) status.textContent = "Check the pin and circle, then save this location.";
+          } catch (error) {
+            const preview = form.querySelector("[data-location-preview]");
+            if (preview) preview.hidden = true;
+            if (status) status.textContent = "Your location was found, but the map preview could not load. Please try again.";
+          }
+        } else {
+          if (form.elements.end_latitude) form.elements.end_latitude.value = String(position.coords.latitude);
+          if (form.elements.end_longitude) form.elements.end_longitude.value = String(position.coords.longitude);
+          form.dataset.locationReady = "yes";
+          form.requestSubmit();
+        }
+      } catch (error) {
+        if (form.matches("[data-end-location]")) {
+          // Ending a drive must remain available when a supervisor declines location access.
+          form.dataset.locationReady = "yes";
+          form.requestSubmit();
+        } else if (status) {
+          status.textContent = "Location was not shared, so this saved location was not created.";
+        }
+      } finally {
+        if (form.dataset.locationReady !== "yes" && submitter) submitter.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-location-save]").forEach(button => {
+    button.addEventListener("click", () => {
+      button.form.dataset.locationReady = "yes";
+    });
+  });
+
+  document.querySelectorAll("form[data-location-create], form[data-location-edit]").forEach(form => {
+    const name = form.querySelector("[data-location-name]");
+    const save = form.querySelector("[data-location-save]");
+    const address = form.querySelector("[data-location-address]");
+    const clearAddress = form.querySelector("[data-location-address-clear]");
+    const updateSaveLabel = () => {
+      const label = name.value.trim();
+      save.textContent = label ? `Save location ${label}` : "Save location";
+    };
+    const updateClearAddress = () => {
+      clearAddress.hidden = !address.value;
+    };
+    name.addEventListener("input", updateSaveLabel);
+    address.addEventListener("input", updateClearAddress);
+    clearAddress.addEventListener("click", () => {
+      address.value = "";
+      updateClearAddress();
+      address.focus();
+    });
+    updateSaveLabel();
+    updateClearAddress();
+  });
+
+  document.querySelectorAll("form[data-location-create], form[data-location-edit]").forEach(form => {
+    const address = form.querySelector("[data-location-address]");
+    const button = form.querySelector("[data-location-search]");
+    button.addEventListener("click", async () => {
+      const query = address.value.trim();
+      const status = form.querySelector("[data-location-status]");
+      if (!query) {
+        status.textContent = "Type an address to search.";
+        return;
+      }
+      button.disabled = true;
+      status.textContent = "Finding that address…";
+      try {
+        const response = await fetch(`/locations/search?address=${encodeURIComponent(query)}`);
+        const {results} = await response.json();
+        if (!response.ok || !results.length) throw new Error("not found");
+        const place = results[0];
+        showLocationPreview(form, {latitude: place.latitude, longitude: place.longitude});
+        status.textContent = `Check the pin and circle for ${place.label}, then save this location.`;
+      } catch (error) {
+        status.textContent = "That address could not be found. Try a more complete address.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll("form[data-location-edit]").forEach(form => {
+    showLocationPreview(form, {
+      latitude: Number(form.dataset.locationLatitude),
+      longitude: Number(form.dataset.locationLongitude),
+    });
+    form.querySelector("[data-location-recapture]").addEventListener("click", async () => {
+      const status = form.querySelector("[data-location-status]");
+      if (status) status.textContent = "Getting your current location…";
+      try {
+        const position = await currentPosition();
+        showLocationPreview(form, {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+        });
+        if (status) status.textContent = "Check the center dot and radius handle, then save your changes.";
+      } catch (error) {
+        if (status) status.textContent = "Location was not shared, so this saved location was not changed.";
       }
     });
   });

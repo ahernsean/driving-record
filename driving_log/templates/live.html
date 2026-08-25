@@ -11,9 +11,12 @@
       <small data-sync-status>Server confirmed</small>
     </section>
     <div class="actions">
-      <form method="post" action="/live/{{ live.id }}/end" data-live-action="end" data-async-submit>
+      <form method="post" action="/live/{{ live.id }}/end" data-live-action="end" data-async-submit data-end-location>
         <input type="hidden" name="request_id" value="{{ '30000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+        <input type="hidden" name="end_latitude">
+        <input type="hidden" name="end_longitude">
         <button class="primary" type="submit">End drive</button>
+        <small class="field-note" data-location-status aria-live="polite"></small>
       </form>
       <form method="post" action="/live/{{ live.id }}/cancel" data-live-action="cancel" data-async-submit onsubmit="return confirm('Cancel this live drive without saving it?')">
         <input type="hidden" name="request_id" value="{{ '40000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
@@ -32,7 +35,8 @@
       </fieldset>
       {% set weather_value = "" %}
       {% include "_weather_picker.html" %}
-      <label>End location<input name="end_location" placeholder="For example, Apex Friendship High School"></label>
+      <label>End location<input name="end_location" value="{{ location_suggestion }}" placeholder="For example, Apex Friendship High School"></label>
+      {% if location_suggestion %}<p class="field-note">Matched from your saved locations. You can change or clear it.</p>{% endif %}
       <label>Notes<textarea name="notes" rows="3"></textarea></label>
       {% if current_user %}
         <label>Supervising driver

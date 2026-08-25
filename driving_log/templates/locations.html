@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block head_extra %}
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css?v={{ asset_version }}">
+  <script src="/static/leaflet/leaflet.js?v={{ asset_version }}"></script>
+{% endblock %}
+{% block content %}
+  <h1>Saved locations</h1>
+  <p class="field-note">Save places such as Home or School. Your device location is used only to set up a place or to suggest an end location; it is never stored with a drive.</p>
+  <form class="stacked-form" method="post" action="/locations" data-location-create>
+    <input type="hidden" name="request_id" value="{{ '80000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+    <input type="hidden" name="latitude">
+    <input type="hidden" name="longitude">
+    <label>Location name<input required maxlength="100" name="name" placeholder="For example, Home" data-location-name></label>
+    <label>Match radius (feet)<input required type="number" min="40" max="16400" step="10" name="radius_feet" value="330"></label>
+    <p class="field-note">A 330-foot radius is a good starting point for a home, school, or parking lot.</p>
+    <section class="location-choice" aria-labelledby="location-choice-heading">
+      <h2 id="location-choice-heading">Choose a location</h2>
+      <p class="field-note">Enter an address or use this device's current location.</p>
+      <label>Address<div class="input-with-clear"><input name="address" autocomplete="street-address" data-location-address placeholder="For example, 123 Main Street, Apex, NC"><button type="button" class="input-clear" aria-label="Clear address" data-location-address-clear hidden>×</button></div></label>
+      <button type="button" data-location-search>Find address</button>
+      <button class="primary" type="submit" data-location-capture>Use my current location</button>
+    </section>
+    <p class="field-note" data-location-status aria-live="polite"></p>
+    <section class="location-preview" data-location-preview hidden aria-label="Location preview">
+      <h2>Preview location</h2>
+      <p class="field-note">Drag the center dot to reposition the location. Drag the small handle on the circle to change its radius.</p>
+      <div class="location-map" data-location-map></div>
+      <p class="field-note" data-location-accuracy></p>
+      <div class="location-preview-actions">
+        <button class="primary" type="submit" data-location-save>Save location</button>
+        <a class="button" href="/">Cancel</a>
+      </div>
+    </section>
+  </form>
+  {% if saved_locations %}
+    <section class="detail-card" aria-label="Configured saved locations">
+      <h2>Configured locations</h2>
+      {% for location in saved_locations %}
+        <div class="saved-location">
+          <span>{{ location.name }} · {{ feet_from_meters(location.radius_meters) }} ft radius</span>
+          <a class="button compact" href="/locations/{{ location.id }}/edit">Edit</a>
+          <form method="post" action="/locations/{{ location.id }}/delete" onsubmit="return confirm('Delete {{ location.name }}?')">
+            <input type="hidden" name="request_id" value="{{ '90000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+            <button class="danger" type="submit">Delete</button>
+          </form>
+        </div>
+      {% endfor %}
+    </section>
+  {% else %}
+    <p class="empty">No saved locations yet.</p>
+  {% endif %}
+{% endblock %}

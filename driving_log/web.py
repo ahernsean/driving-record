@@ -7,9 +7,10 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -24,11 +25,13 @@ from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
 from driving_log.dmv import DmvExportService, SupervisorProfileService, mask_license
 from driving_log.live import MINIMUM_DRIVE_SECONDS, LiveDriveService
+from driving_log.locations import SavedLocationService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
 from driving_log.solar import apex_daylight_window, resolve_local
 
 PACKAGE_DIR = Path(__file__).parent
 ZONE = ZoneInfo("America/New_York")
+METERS_PER_FOOT = 0.3048
 
 
 def _parse_local(value: str, fold_text: str | None = None) -> datetime:
@@ -39,6 +42,14 @@ def _parse_local(value: str, fold_text: str | None = None) -> datetime:
 
 def _format_minutes(minutes: int) -> str:
     return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def _feet_from_meters(meters: int | float) -> int:
+    return round(float(meters) / METERS_PER_FOOT / 10) * 10
+
+
+def _meters_from_feet(feet: int) -> int:
+    return round(round(feet / 10) * 10 * METERS_PER_FOOT)
 
 
 def _local_datetime(value: str | datetime) -> datetime:
@@ -110,7 +121,7 @@ GROUP_BY_OPTIONS = (
     ("duration", "Duration"),
 )
 AUTH_SUPERVISORS = (ACCOUNTS["sean"], ACCOUNTS["jen"], ACCOUNTS["bethany"])
-MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives"})
+MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives", "/locations"})
 
 
 def _part_of_day(value: str | datetime, timezone_name: str) -> str:
@@ -254,19 +265,22 @@ def _is_read_only(request: Request) -> bool:
 
 
 def _is_mutation_page(path: str) -> bool:
-    return path in MUTATION_PAGE_PATHS or (path.startswith("/drives/") and path.endswith("/edit"))
+    return path in MUTATION_PAGE_PATHS or (
+        (path.startswith("/drives/") or path.startswith("/locations/")) and path.endswith("/edit")
+    )
 
 
 def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
     asset_digest = hashlib.sha256()
-    for asset_name in ("app.css", "app.js"):
+    for asset_name in ("app.css", "app.js", "leaflet/leaflet.css", "leaflet/leaflet.js"):
         asset_digest.update((PACKAGE_DIR / "static" / asset_name).read_bytes())
     asset_version = asset_digest.hexdigest()[:12]
     records = RecordService(database)
     live = LiveDriveService(database)
     profiles = SupervisorProfileService(database)
+    locations = SavedLocationService(database)
     dmv = DmvExportService(database)
     authenticator = Authenticator(
         settings.sean_password_hash,
@@ -315,6 +329,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         return {
             "request": request,
             "format_minutes": _format_minutes,
+            "feet_from_meters": _feet_from_meters,
             "format_local_datetime": _format_local_datetime,
             "format_local_date": _format_local_date,
             "asset_version": asset_version,
@@ -798,6 +813,96 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             if row["id"] != exclude_drive_id
         ]
 
+    @app.get("/locations", response_class=HTMLResponse)
+    async def saved_locations_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "locations.html",
+            common(
+                request,
+                title="Saved locations",
+                saved_locations=locations.list_for_student(),
+            ),
+        )
+
+    @app.post("/locations")
+    async def saved_location_create(request: Request) -> RedirectResponse:
+        form = await read_form(request)
+        locations.create(
+            name=str(form.get("name", "")),
+            latitude=float(str(form["latitude"])),
+            longitude=float(str(form["longitude"])),
+            radius_meters=_meters_from_feet(int(str(form.get("radius_feet", "")))),
+            request_id=str(form["request_id"]),
+            actor_identity=_actor(request),
+        )
+        return redirect("/locations")
+
+    @app.get("/locations/search")
+    async def saved_location_search(address: str = "") -> JSONResponse:
+        query = " ".join(address.split())
+        if len(query) < 3:
+            return JSONResponse({"results": []})
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": query, "format": "jsonv2", "limit": 5},
+                    headers={
+                        "Accept-Language": "en",
+                        "User-Agent": "DanielDrivingLog/1.0 (private supervised-driving log)",
+                    },
+                )
+                response.raise_for_status()
+        except httpx.HTTPError:
+            return JSONResponse({"results": []}, status_code=503)
+        results = [
+            {
+                "latitude": float(result["lat"]),
+                "longitude": float(result["lon"]),
+                "label": str(result["display_name"]),
+            }
+            for result in response.json()
+            if "lat" in result and "lon" in result and "display_name" in result
+        ]
+        return JSONResponse({"results": results})
+
+    @app.post("/locations/{location_id}/delete")
+    async def saved_location_delete(request: Request, location_id: str) -> RedirectResponse:
+        form = await read_form(request)
+        locations.delete(
+            location_id,
+            request_id=str(form["request_id"]),
+            actor_identity=_actor(request),
+        )
+        return redirect("/locations")
+
+    @app.get("/locations/{location_id}/edit", response_class=HTMLResponse)
+    async def saved_location_edit_page(request: Request, location_id: str) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "location_edit.html",
+            common(
+                request,
+                title="Edit saved location",
+                location=locations.get(location_id),
+            ),
+        )
+
+    @app.post("/locations/{location_id}/edit")
+    async def saved_location_edit(request: Request, location_id: str) -> RedirectResponse:
+        form = await read_form(request)
+        locations.update(
+            location_id,
+            name=str(form.get("name", "")),
+            latitude=float(str(form["latitude"])),
+            longitude=float(str(form["longitude"])),
+            radius_meters=_meters_from_feet(int(str(form.get("radius_feet", "")))),
+            request_id=str(form["request_id"]),
+            actor_identity=_actor(request),
+        )
+        return redirect("/locations")
+
     @app.get("/drives/new", response_class=HTMLResponse)
     async def drive_new(request: Request) -> HTMLResponse:
         now = datetime.now(ZONE).replace(second=0, microsecond=0)
@@ -990,6 +1095,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 title="Live drive",
                 live=open_drive,
                 supervisor_options=AUTH_SUPERVISORS,
+                location_suggestion=request.query_params.get("location_suggestion", ""),
                 **time_values,
             ),
         )
@@ -1013,12 +1119,22 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     @app.post("/live/{live_id}/end")
     async def live_end(request: Request, live_id: str) -> RedirectResponse:
         form = await read_form(request)
+        live.find(live_id)
+        suggestion = None
+        latitude_text = str(form.get("end_latitude", ""))
+        longitude_text = str(form.get("end_longitude", ""))
+        if latitude_text and longitude_text:
+            suggestion = locations.match(
+                latitude=float(latitude_text),
+                longitude=float(longitude_text),
+            )
         live.end(
             live_id,
             request_id=str(form["request_id"]),
             actor_identity=_actor(request),
         )
-        return redirect("/live")
+        suffix = f"?{urlencode({'location_suggestion': suggestion})}" if suggestion else ""
+        return redirect(f"/live{suffix}")
 
     @app.post("/live/{live_id}/resume")
     async def live_resume(request: Request, live_id: str) -> RedirectResponse:

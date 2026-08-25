@@ -203,6 +203,33 @@ fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; border: 1p
 .field-note, .empty { color: var(--muted); font-weight: 400; }
 .detail-card { display: grid; gap: 1rem; }
 .detail-card div { display: grid; gap: .2rem; overflow-wrap: anywhere; }
+.saved-location { grid-template-columns: 1fr auto auto; align-items: center; }
+.location-preview { display: grid; gap: .75rem; }
+.location-preview h2 { margin: 0; }
+.location-preview-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+.location-preview-actions .button { margin: 0; }
+.location-map { min-height: 20rem; border: 1px solid var(--border); border-radius: 1rem; overflow: hidden; }
+.leaflet-container { font: inherit; }
+.leaflet-control-attribution { font-size: .65rem; }
+.location-radius-handle {
+  width: 1.25rem !important; height: 1.25rem !important; margin: -.625rem 0 0 -.625rem !important;
+  border: .2rem solid #fff; border-radius: 50%; background: #1769e0;
+  box-shadow: 0 0 0 1px color-mix(in srgb, #1769e0 75%, transparent);
+}
+.location-choice { display: grid; gap: .75rem; }
+.location-choice h2, .location-choice p { margin: 0; }
+.input-with-clear { position: relative; }
+.input-with-clear input { padding-right: 3rem; }
+.input-clear {
+  position: absolute; top: 50%; right: .35rem; width: 2.25rem; min-height: 2.25rem; padding: 0;
+  transform: translateY(-50%); border: 0; border-radius: 50%; background: transparent; color: var(--muted);
+  font-size: 1.5rem; line-height: 1;
+}
+.location-center-dot {
+  width: 1.5rem !important; height: 1.5rem !important; margin: -.75rem 0 0 -.75rem !important;
+  border: .2rem solid #fff; border-radius: 50%; background: #1769e0;
+  box-shadow: 0 1px 4px rgb(0 0 0 / .45);
+}
 .warning-card { background: var(--warning); margin: 1rem 0; }
 .live-banner {
   display: block; padding: .9rem; border-radius: .8rem; background: var(--accent);

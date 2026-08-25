@@ -6,6 +6,7 @@
   <meta name="theme-color" content="{{ '#101b2d' if theme == 'dark' else '#f4f8ff' }}">
   <title>{{ title }}</title>
   <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
+  {% block head_extra %}{% endblock %}
   <script>
     window.DRIVING_LOG_THEME = {{ theme_boundaries | tojson }};
     window.DRIVING_LOG_SERVER_NOW = {{ server_now_utc | tojson }};
@@ -19,6 +20,7 @@
       <a href="/">Dashboard</a>
       <a href="/drives">History</a>
       <a href="/imports">Data</a>
+      {% if not is_read_only %}<a href="/locations">Locations</a>{% endif %}
     </nav>
   </header>
   <main>{% block content %}{% endblock %}</main>
