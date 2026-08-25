@@ -10,6 +10,7 @@ from typing import cast
 from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -44,11 +45,11 @@ def _format_minutes(minutes: int) -> str:
 
 
 def _feet_from_meters(meters: int | float) -> int:
-    return round(float(meters) / METERS_PER_FOOT)
+    return round(float(meters) / METERS_PER_FOOT / 10) * 10
 
 
 def _meters_from_feet(feet: int) -> int:
-    return round(feet * METERS_PER_FOOT)
+    return round(round(feet / 10) * 10 * METERS_PER_FOOT)
 
 
 def _local_datetime(value: str | datetime) -> datetime:
@@ -836,6 +837,35 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             actor_identity=_actor(request),
         )
         return redirect("/locations")
+
+    @app.get("/locations/search")
+    async def saved_location_search(address: str = "") -> JSONResponse:
+        query = " ".join(address.split())
+        if len(query) < 3:
+            return JSONResponse({"results": []})
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": query, "format": "jsonv2", "limit": 5},
+                    headers={
+                        "Accept-Language": "en",
+                        "User-Agent": "DanielDrivingLog/1.0 (private supervised-driving log)",
+                    },
+                )
+                response.raise_for_status()
+        except httpx.HTTPError:
+            return JSONResponse({"results": []}, status_code=503)
+        results = [
+            {
+                "latitude": float(result["lat"]),
+                "longitude": float(result["lon"]),
+                "label": str(result["display_name"]),
+            }
+            for result in response.json()
+            if "lat" in result and "lon" in result and "display_name" in result
+        ]
+        return JSONResponse({"results": results})
 
     @app.post("/locations/{location_id}/delete")
     async def saved_location_delete(request: Request, location_id: str) -> RedirectResponse:

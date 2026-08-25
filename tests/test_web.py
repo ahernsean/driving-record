@@ -75,6 +75,47 @@ class WebTests(unittest.TestCase):
                 page = await client.get("/locations")
                 self.assertEqual(page.status_code, 200)
                 self.assertIn("Saved locations", page.text)
+                self.assertEqual(
+                    (await client.get("/locations/search?address=ab")).json(), {"results": []}
+                )
+
+                class SearchResponse:
+                    def raise_for_status(self) -> None:
+                        pass
+
+                    def json(self) -> list[dict[str, str]]:
+                        return [
+                            {
+                                "lat": "35.7327",
+                                "lon": "-78.8503",
+                                "display_name": "Home, Apex, North Carolina",
+                            }
+                        ]
+
+                class SearchClient:
+                    async def __aenter__(self) -> SearchClient:
+                        return self
+
+                    async def __aexit__(self, *args: object) -> None:
+                        pass
+
+                    async def get(self, *args: object, **kwargs: object) -> SearchResponse:
+                        return SearchResponse()
+
+                with patch("driving_log.web.httpx.AsyncClient", return_value=SearchClient()):
+                    search = await client.get("/locations/search?address=Home%2C+Apex%2C+NC")
+                self.assertEqual(
+                    search.json(),
+                    {
+                        "results": [
+                            {
+                                "latitude": 35.7327,
+                                "longitude": -78.8503,
+                                "label": "Home, Apex, North Carolina",
+                            }
+                        ]
+                    },
+                )
                 created = await client.post(
                     "/locations",
                     data={
@@ -82,12 +123,12 @@ class WebTests(unittest.TestCase):
                         "name": "Home",
                         "latitude": "35.7327",
                         "longitude": "-78.8503",
-                        "radius_feet": "328",
+                        "radius_feet": "330",
                     },
                 )
                 self.assertEqual(created.headers["location"], "/locations")
                 configured = await client.get("/locations")
-                self.assertIn("Home · 328 ft radius", configured.text)
+                self.assertIn("Home · 330 ft radius", configured.text)
                 connection = self.app.state.database.connect_readonly()
                 try:
                     location_id = connection.execute("SELECT id FROM saved_locations").fetchone()[0]
@@ -103,12 +144,12 @@ class WebTests(unittest.TestCase):
                         "name": "Home base",
                         "latitude": "35.7328",
                         "longitude": "-78.8503",
-                        "radius_feet": "492",
+                        "radius_feet": "490",
                     },
                 )
                 self.assertEqual(updated.headers["location"], "/locations")
                 updated_page = await client.get("/locations")
-                self.assertIn("Home base · 492 ft radius", updated_page.text)
+                self.assertIn("Home base · 490 ft radius", updated_page.text)
                 deleted = await client.post(
                     f"/locations/{location_id}/delete", data={"request_id": str(uuid.uuid4())}
                 )

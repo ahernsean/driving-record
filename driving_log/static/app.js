@@ -471,14 +471,17 @@
       attribution: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
       maxZoom: 19,
     }).addTo(map);
-    const marker = L.marker([latitude, longitude], {draggable: true}).addTo(map);
+    const marker = L.marker([latitude, longitude], {
+      draggable: true,
+      icon: L.divIcon({className: "location-center-dot", iconSize: [24, 24], iconAnchor: [12, 12]}),
+    }).addTo(map);
     const metersPerFoot = 0.3048;
     const circle = L.circle([latitude, longitude], {radius: Number(radiusInput.value) * metersPerFoot}).addTo(map);
     const radiusHandle = L.marker([latitude, longitude], {
       draggable: true,
       icon: L.divIcon({className: "location-radius-handle", iconSize: [20, 20]}),
     }).addTo(map);
-    const clampRadius = value => Math.max(33, Math.min(16404, Math.round(value)));
+    const clampRadius = value => Math.max(40, Math.min(16400, Math.round(value / 10) * 10));
     const radiusHandlePosition = (latlng, radius) => {
       const latitudeRadians = latlng.lat * Math.PI / 180;
       const longitudeDelta = radius / (111_320 * Math.max(Math.cos(latitudeRadians), 0.01));
@@ -569,6 +572,56 @@
   document.querySelectorAll("[data-location-save]").forEach(button => {
     button.addEventListener("click", () => {
       button.form.dataset.locationReady = "yes";
+    });
+  });
+
+  document.querySelectorAll("form[data-location-create], form[data-location-edit]").forEach(form => {
+    const name = form.querySelector("[data-location-name]");
+    const save = form.querySelector("[data-location-save]");
+    const address = form.querySelector("[data-location-address]");
+    const clearAddress = form.querySelector("[data-location-address-clear]");
+    const updateSaveLabel = () => {
+      const label = name.value.trim();
+      save.textContent = label ? `Save location ${label}` : "Save location";
+    };
+    const updateClearAddress = () => {
+      clearAddress.hidden = !address.value;
+    };
+    name.addEventListener("input", updateSaveLabel);
+    address.addEventListener("input", updateClearAddress);
+    clearAddress.addEventListener("click", () => {
+      address.value = "";
+      updateClearAddress();
+      address.focus();
+    });
+    updateSaveLabel();
+    updateClearAddress();
+  });
+
+  document.querySelectorAll("form[data-location-create], form[data-location-edit]").forEach(form => {
+    const address = form.querySelector("[data-location-address]");
+    const button = form.querySelector("[data-location-search]");
+    button.addEventListener("click", async () => {
+      const query = address.value.trim();
+      const status = form.querySelector("[data-location-status]");
+      if (!query) {
+        status.textContent = "Type an address to search.";
+        return;
+      }
+      button.disabled = true;
+      status.textContent = "Finding that address…";
+      try {
+        const response = await fetch(`/locations/search?address=${encodeURIComponent(query)}`);
+        const {results} = await response.json();
+        if (!response.ok || !results.length) throw new Error("not found");
+        const place = results[0];
+        showLocationPreview(form, {latitude: place.latitude, longitude: place.longitude});
+        status.textContent = `Check the pin and circle for ${place.label}, then save this location.`;
+      } catch (error) {
+        status.textContent = "That address could not be found. Try a more complete address.";
+      } finally {
+        button.disabled = false;
+      }
     });
   });
 

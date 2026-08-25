@@ -10,10 +10,16 @@
     <input type="hidden" name="request_id" value="{{ '80000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     <input type="hidden" name="latitude">
     <input type="hidden" name="longitude">
-    <label>Location name<input required maxlength="100" name="name" placeholder="For example, Home"></label>
-    <label>Match radius (feet)<input required type="number" min="33" max="16404" step="1" name="radius_feet" value="328"></label>
+    <label>Location name<input required maxlength="100" name="name" placeholder="For example, Home" data-location-name></label>
+    <label>Match radius (feet)<input required type="number" min="40" max="16400" step="10" name="radius_feet" value="330"></label>
     <p class="field-note">A 330-foot radius is a good starting point for a home, school, or parking lot.</p>
-    <button class="primary" type="submit" data-location-capture>Use my current location</button>
+    <section class="location-choice" aria-labelledby="location-choice-heading">
+      <h2 id="location-choice-heading">Choose a location</h2>
+      <p class="field-note">Enter an address or use this device's current location.</p>
+      <label>Address<div class="input-with-clear"><input name="address" autocomplete="street-address" data-location-address placeholder="For example, 123 Main Street, Apex, NC"><button type="button" class="input-clear" aria-label="Clear address" data-location-address-clear hidden>×</button></div></label>
+      <button type="button" data-location-search>Find address</button>
+      <button class="primary" type="submit" data-location-capture>Use my current location</button>
+    </section>
     <p class="field-note" data-location-status aria-live="polite"></p>
     <section class="location-preview" data-location-preview hidden aria-label="Location preview">
       <h2>Preview location</h2>
@@ -21,7 +27,7 @@
       <div class="location-map" data-location-map></div>
       <p class="field-note" data-location-accuracy></p>
       <div class="location-preview-actions">
-        <button class="primary" type="submit" data-location-save>Save this location</button>
+        <button class="primary" type="submit" data-location-save>Save location</button>
         <a class="button" href="/">Cancel</a>
       </div>
     </section>

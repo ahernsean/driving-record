@@ -29,6 +29,7 @@ REQUIRED_TABLES = {
 }
 SCHEMA_TABLES = {
     3: {"supervisor_profiles"},
+    4: {"saved_locations"},
 }
 
 
