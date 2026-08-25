@@ -463,9 +463,11 @@
     const radiusInput = form.elements.radius_meters;
     const accuracy = form.querySelector("[data-location-accuracy]");
     if (!preview || !container || !radiusInput || !accuracy) throw new Error("The map preview is unavailable.");
+    if (form.locationPreviewMap) form.locationPreviewMap.remove();
     preview.hidden = false;
     container.replaceChildren();
     const map = L.map(container, {scrollWheelZoom: false});
+    form.locationPreviewMap = map;
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
       maxZoom: 19,
@@ -485,10 +487,10 @@
       circle.setLatLng(latlng);
     };
     map.on("click", event => updateCoordinates(event.latlng));
-    radiusInput.addEventListener("input", () => {
+    radiusInput.oninput = () => {
       const radius = Number(radiusInput.value);
       if (Number.isFinite(radius) && radius > 0) circle.setRadius(radius);
-    });
+    };
     updateCoordinates(marker.getLatLng());
     accuracy.textContent = `Device accuracy is approximately ${Math.round(position.coords.accuracy)} meters.`;
     map.setView([latitude, longitude], 17);
