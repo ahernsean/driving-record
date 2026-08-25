@@ -27,7 +27,6 @@
   </section>
 
   {% if not is_read_only %}<h2>Supervising drivers</h2>
-  <p class="muted">License details are stored in the private database and full-state archives. They are not included in CSV backups.</p>
   {% for profile in profiles %}
     <article class="detail-card profile-card">
       <strong>{{ profile.display_name }}</strong>
@@ -61,7 +60,7 @@
     </article>
   {% endfor %}
 
-  {% if missing_supervisor_options %}<h2>Add license information</h2>
+  {% if missing_supervisor_options %}<h2 id="add-license-information">Add license information</h2>
   <form class="stacked-form" method="post" action="/dmv/profiles" data-async-submit>
     <input type="hidden" name="request_id" value="{{ '83000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     <label>Name

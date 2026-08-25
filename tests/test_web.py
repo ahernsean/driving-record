@@ -214,6 +214,10 @@ class WebTests(unittest.TestCase):
                 self.assertIn("driving_log_session", signed_in.headers["set-cookie"])
                 dashboard = await client.get("/")
                 self.assertIn("Signed in as Jen Ahern", dashboard.text)
+                self.assertIn(
+                    'href="/dmv#add-license-information">Add driver license information',
+                    dashboard.text,
+                )
                 self.assertLess(
                     dashboard.text.index("</main>"), dashboard.text.index("Signed in as Jen Ahern")
                 )
@@ -249,6 +253,17 @@ class WebTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(invalid.status_code, 400)
+                profile_created = await client.post(
+                    "/dmv/profiles",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "display_name": "Jen Ahern",
+                        "dl_number": "SYNTHETIC-1234",
+                        "dl_state": "NC",
+                    },
+                )
+                self.assertEqual(profile_created.status_code, 303)
+                self.assertNotIn("Add driver license information", (await client.get("/")).text)
                 signed_out = await client.post("/logout")
                 self.assertEqual(signed_out.status_code, 303)
                 self.assertIn("Max-Age=0", signed_out.headers["set-cookie"])
@@ -322,6 +337,7 @@ class WebTests(unittest.TestCase):
                     self.assertIn("Signed in as Daniel Ahern (view only)", dashboard.text)
                     self.assertNotIn("Start a drive", dashboard.text)
                     self.assertNotIn("Add drive", dashboard.text)
+                    self.assertNotIn("Add driver license information", dashboard.text)
                     history = await daniel.get("/drives?group_by=supervisor")
                     self.assertEqual(history.status_code, 200)
                     self.assertIn("Group filtered drives by", history.text)
@@ -635,6 +651,10 @@ class WebTests(unittest.TestCase):
                 self.assertIn("Verified archive", archives.text)
                 imports = await client.get("/imports")
                 self.assertIn("Imports and exports", imports.text)
+                self.assertIn(
+                    "License details are stored in the private database and full-state archives.",
+                    imports.text,
+                )
                 self.assertIn('href="/archives">Archives</a>', imports.text)
                 self.assertIn(
                     'href="/csv/export" data-file-export data-export-filename="driving-log.csv"',
@@ -1369,7 +1389,9 @@ class WebTests(unittest.TestCase):
                 self.assertIn("••••••••••1234", profile_page.text)
                 self.assertIn("SYNTHETIC-1234", profile_page.text)
                 add_form = re.search(
-                    r"<h2>Add license information</h2>(.*?)</form>", profile_page.text, re.DOTALL
+                    r'<h2 id="add-license-information">Add license information</h2>(.*?)</form>',
+                    profile_page.text,
+                    re.DOTALL,
                 )
                 self.assertIsNotNone(add_form)
                 add_form_text = add_form.group(1) if add_form else ""

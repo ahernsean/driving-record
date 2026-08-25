@@ -461,6 +461,16 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
     async def dashboard(request: Request) -> HTMLResponse:
         totals = records.totals()
         open_drive = live.current()
+        current_user = _actor(request)
+        profiled_names = {
+            normalize_supervisor_name(str(profile["display_name"]))
+            for profile in profiles.list_profiles()
+        }
+        show_license_shortcut = bool(
+            current_user
+            and not _is_read_only(request)
+            and normalize_supervisor_name(current_user) not in profiled_names
+        )
         weeks = cast(list[dict[str, object]], totals["weeks"])
         overages = [
             week
@@ -484,6 +494,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 overages=overages,
                 live=open_drive,
                 saved_drive=saved_drive,
+                show_license_shortcut=show_license_shortcut,
             ),
         )
 
