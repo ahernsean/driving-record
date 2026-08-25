@@ -93,6 +93,22 @@ class WebTests(unittest.TestCase):
                     location_id = connection.execute("SELECT id FROM saved_locations").fetchone()[0]
                 finally:
                     connection.close()
+                edit_page = await client.get(f"/locations/{location_id}/edit")
+                self.assertEqual(edit_page.status_code, 200)
+                self.assertIn("Edit Home", edit_page.text)
+                updated = await client.post(
+                    f"/locations/{location_id}/edit",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "name": "Home base",
+                        "latitude": "35.7328",
+                        "longitude": "-78.8503",
+                        "radius_meters": "150",
+                    },
+                )
+                self.assertEqual(updated.headers["location"], "/locations")
+                updated_page = await client.get("/locations")
+                self.assertIn("Home base · 150 m radius", updated_page.text)
                 deleted = await client.post(
                     f"/locations/{location_id}/delete", data={"request_id": str(uuid.uuid4())}
                 )

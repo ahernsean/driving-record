@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block head_extra %}
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css?v={{ asset_version }}">
+  <script src="/static/leaflet/leaflet.js?v={{ asset_version }}"></script>
+{% endblock %}
+{% block content %}
+  <h1>Edit {{ location.name }}</h1>
+  <p class="field-note">Drag the center dot to reposition the location. Drag the small handle on the circle to change its radius.</p>
+  <form class="stacked-form" method="post" action="/locations/{{ location.id }}/edit" data-location-edit data-location-latitude="{{ location.latitude }}" data-location-longitude="{{ location.longitude }}">
+    <input type="hidden" name="request_id" value="{{ '81000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
+    <input type="hidden" name="latitude" value="{{ location.latitude }}">
+    <input type="hidden" name="longitude" value="{{ location.longitude }}">
+    <label>Location name<input required maxlength="100" name="name" value="{{ location.name }}"></label>
+    <label>Match radius (meters)<input required type="number" min="10" max="5000" step="1" name="radius_meters" value="{{ location.radius_meters }}"></label>
+    <button type="button" data-location-recapture>Use my current location</button>
+    <p class="field-note" data-location-status aria-live="polite"></p>
+    <section class="location-preview" data-location-preview aria-label="Location preview">
+      <div class="location-map" data-location-map></div>
+      <p class="field-note" data-location-accuracy>Drag the center dot or radius handle to adjust this saved location.</p>
+      <div class="location-preview-actions">
+        <button class="primary" type="submit">Save changes</button>
+        <a class="button" href="/locations">Cancel</a>
+      </div>
+    </section>
+  </form>
+{% endblock %}

@@ -123,6 +123,81 @@ class SavedLocationService:
             if connection is None:
                 selected.close()
 
+    def update(
+        self,
+        location_id: str,
+        *,
+        name: str,
+        latitude: float,
+        longitude: float,
+        radius_meters: int,
+        request_id: str,
+        actor_identity: str | None,
+        student_name: str = STUDENT_NAME,
+    ) -> sqlite3.Row:
+        display_name, normalized, lat, lon, radius = self._validated(
+            name, latitude, longitude, radius_meters
+        )
+        digest = payload_hash(
+            {
+                "action": "saved_location.update",
+                "location_id": location_id,
+                "student_name": student_name,
+                "name": display_name,
+                "latitude": lat,
+                "longitude": lon,
+                "radius_meters": radius,
+            }
+        )
+        with self.database.transaction() as connection:
+            prior = connection.execute(
+                "SELECT action, payload_hash, entity_id FROM audit_events WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if prior:
+                if prior["action"] != "saved_location.update" or prior["payload_hash"] != digest:
+                    raise ConflictError("request ID was already used with different location data")
+                return self.get(
+                    str(prior["entity_id"]), student_name=student_name, connection=connection
+                )
+            self.get(location_id, student_name=student_name, connection=connection)
+            duplicate = connection.execute(
+                """SELECT 1 FROM saved_locations
+                WHERE student_name=? AND normalized_name=? AND id<>?""",
+                (student_name, normalized, location_id),
+            ).fetchone()
+            if duplicate:
+                raise ConflictError("a saved location already has that name")
+            connection.execute(
+                """UPDATE saved_locations
+                SET name=?, normalized_name=?, latitude=?, longitude=?,
+                    radius_meters=?, updated_at=?
+                WHERE id=? AND student_name=?""",
+                (
+                    display_name,
+                    normalized,
+                    lat,
+                    lon,
+                    radius,
+                    utc_now_text(),
+                    location_id,
+                    student_name,
+                ),
+            )
+            self.database.audit(
+                connection,
+                event_id=str(uuid.uuid4()),
+                request_id=request_id,
+                action="saved_location.update",
+                payload_hash=digest,
+                entity_type="saved_location",
+                entity_id=location_id,
+                outcome="updated",
+                metadata={"name": display_name, "radius_meters": radius},
+                actor_identity=actor_identity,
+            )
+            return self.get(location_id, student_name=student_name, connection=connection)
+
     def delete(
         self,
         location_id: str,

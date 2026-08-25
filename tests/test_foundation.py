@@ -198,11 +198,70 @@ class DatabaseTests(unittest.TestCase):
             )
         with self.assertRaises(NotFoundError):
             locations.get(created["id"], student_name="Another student")
+        updated = locations.update(
+            created["id"],
+            name="School base",
+            latitude=35.001,
+            longitude=-78.0,
+            radius_meters=300,
+            request_id="update-school",
+            actor_identity="Bethany O'Banion",
+        )
+        self.assertEqual(updated["name"], "School base")
+        self.assertEqual(
+            locations.update(
+                created["id"],
+                name="School base",
+                latitude=35.001,
+                longitude=-78.0,
+                radius_meters=300,
+                request_id="update-school",
+                actor_identity="Bethany O'Banion",
+            )["id"],
+            created["id"],
+        )
+        with self.assertRaises(ConflictError):
+            locations.update(
+                created["id"],
+                name="School base",
+                latitude=35.001,
+                longitude=-78.0,
+                radius_meters=301,
+                request_id="update-school",
+                actor_identity="Bethany O'Banion",
+            )
+        home = locations.create(
+            name="Home",
+            latitude=35.002,
+            longitude=-78.0,
+            radius_meters=100,
+            request_id="create-home",
+            actor_identity="Sean Ahern",
+        )
+        with self.assertRaises(ConflictError):
+            locations.update(
+                created["id"],
+                name="Home",
+                latitude=35.001,
+                longitude=-78.0,
+                radius_meters=300,
+                request_id="update-to-home",
+                actor_identity="Bethany O'Banion",
+            )
+        self.assertEqual(
+            locations.match(latitude=35.001, longitude=-78.0),
+            "School base",
+        )
         with self.assertRaisesRegex(ValueError, "coordinates"):
             locations.match(latitude=100.0, longitude=0.0)
         locations.delete(
             created["id"],
             request_id="delete-school",
+            actor_identity="Sean Ahern",
+        )
+        locations.delete(
+            home["id"],
+            request_id="delete-home",
             actor_identity="Sean Ahern",
         )
         locations.delete(

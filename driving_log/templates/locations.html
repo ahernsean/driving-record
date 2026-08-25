@@ -17,7 +17,7 @@
     <p class="field-note" data-location-status aria-live="polite"></p>
     <section class="location-preview" data-location-preview hidden aria-label="Location preview">
       <h2>Preview location</h2>
-      <p class="field-note">Tap the map to move the marker, or adjust the radius until the circle covers the place you mean.</p>
+      <p class="field-note">Drag the center dot to reposition the location. Drag the small handle on the circle to change its radius.</p>
       <div class="location-map" data-location-map></div>
       <p class="field-note" data-location-accuracy></p>
       <div class="location-preview-actions">
@@ -32,6 +32,7 @@
       {% for location in saved_locations %}
         <div class="saved-location">
           <span>{{ location.name }} · {{ location.radius_meters }} m radius</span>
+          <a class="button compact" href="/locations/{{ location.id }}/edit">Edit</a>
           <form method="post" action="/locations/{{ location.id }}/delete" onsubmit="return confirm('Delete {{ location.name }}?')">
             <input type="hidden" name="request_id" value="{{ '90000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
             <button class="danger" type="submit">Delete</button>

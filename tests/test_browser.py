@@ -331,6 +331,20 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 with page.expect_navigation():
                     page.get_by_role("button", name="Save this location").click()
                 assert page.get_by_text("Home · 150 m radius").is_visible()
+                page.get_by_role("link", name="Edit").click()
+                page.locator("[data-location-map].leaflet-container").wait_for()
+                page.locator("[data-location-edit]").evaluate(
+                    """form => {
+                      const {center, radius} = form.locationPreviewMarkers;
+                      center.setLatLng([35.7330, -78.8503]);
+                      center.fire('drag', {target: center});
+                      radius.setLatLng([35.7330, -78.8473]);
+                      radius.fire('drag', {target: radius});
+                    }"""
+                )
+                assert page.locator('input[name="latitude"]').input_value() == "35.733"
+                assert page.locator('input[name="radius_meters"]').input_value() != "150"
+                page.get_by_role("link", name="Cancel").click()
                 page.get_by_role("link", name="Dashboard").click()
                 page.locator(".progress-percent-value").evaluate(
                     "element => { element.textContent = '108%'; }"

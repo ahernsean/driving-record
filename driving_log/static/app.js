@@ -454,10 +454,9 @@
     ));
   }
 
-  function showLocationPreview(form, position) {
+  function showLocationPreview(form, location) {
     if (!window.L) throw new Error("The map preview could not load.");
-    const latitude = position.coords.latitude;
-    const longitude = position.coords.longitude;
+    const {latitude, longitude, accuracyMeters} = location;
     const preview = form.querySelector("[data-location-preview]");
     const container = form.querySelector("[data-location-map]");
     const radiusInput = form.elements.radius_meters;
@@ -472,27 +471,52 @@
       attribution: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
       maxZoom: 19,
     }).addTo(map);
-    const marker = L.circleMarker([latitude, longitude], {
-      radius: 9,
-      color: "#1769e0",
-      fillColor: "#1769e0",
-      fillOpacity: 1,
-      weight: 2,
-    }).addTo(map);
+    const marker = L.marker([latitude, longitude], {draggable: true}).addTo(map);
     const circle = L.circle([latitude, longitude], {radius: Number(radiusInput.value)}).addTo(map);
+    const radiusHandle = L.marker([latitude, longitude], {
+      draggable: true,
+      icon: L.divIcon({className: "location-radius-handle", iconSize: [20, 20]}),
+    }).addTo(map);
+    const clampRadius = value => Math.max(10, Math.min(5000, Math.round(value)));
+    const radiusHandlePosition = (latlng, radius) => {
+      const latitudeRadians = latlng.lat * Math.PI / 180;
+      const longitudeDelta = radius / (111_320 * Math.max(Math.cos(latitudeRadians), 0.01));
+      return L.latLng(latlng.lat, latlng.lng + longitudeDelta);
+    };
+    const distanceMeters = (first, second) => {
+      const radians = Math.PI / 180;
+      const latitudeDelta = (second.lat - first.lat) * radians;
+      const longitudeDelta = (second.lng - first.lng) * radians;
+      const a = Math.sin(latitudeDelta / 2) ** 2
+        + Math.cos(first.lat * radians) * Math.cos(second.lat * radians)
+        * Math.sin(longitudeDelta / 2) ** 2;
+      return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+    const updateRadius = radius => {
+      const selectedRadius = clampRadius(radius);
+      radiusInput.value = String(selectedRadius);
+      circle.setRadius(selectedRadius);
+      radiusHandle.setLatLng(radiusHandlePosition(marker.getLatLng(), selectedRadius));
+    };
     const updateCoordinates = latlng => {
       form.elements.latitude.value = String(latlng.lat);
       form.elements.longitude.value = String(latlng.lng);
       marker.setLatLng(latlng);
       circle.setLatLng(latlng);
+      updateRadius(Number(radiusInput.value));
     };
     map.on("click", event => updateCoordinates(event.latlng));
+    marker.on("drag", event => updateCoordinates(event.target.getLatLng()));
+    radiusHandle.on("drag", event => updateRadius(distanceMeters(marker.getLatLng(), event.target.getLatLng())));
     radiusInput.oninput = () => {
       const radius = Number(radiusInput.value);
-      if (Number.isFinite(radius) && radius > 0) circle.setRadius(radius);
+      if (Number.isFinite(radius) && radius > 0) updateRadius(radius);
     };
     updateCoordinates(marker.getLatLng());
-    accuracy.textContent = `Device accuracy is approximately ${Math.round(position.coords.accuracy)} meters.`;
+    form.locationPreviewMarkers = {center: marker, radius: radiusHandle};
+    if (accuracyMeters !== undefined) {
+      accuracy.textContent = `Device accuracy is approximately ${Math.round(accuracyMeters)} meters.`;
+    }
     map.setView([latitude, longitude], 17);
     setTimeout(() => map.invalidateSize(), 0);
   }
@@ -509,7 +533,11 @@
         const position = await currentPosition();
         if (form.matches("[data-location-create]")) {
           try {
-            showLocationPreview(form, position);
+            showLocationPreview(form, {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracyMeters: position.coords.accuracy,
+            });
             if (status) status.textContent = "Check the pin and circle, then save this location.";
           } catch (error) {
             const preview = form.querySelector("[data-location-preview]");
@@ -539,6 +567,28 @@
   document.querySelectorAll("[data-location-save]").forEach(button => {
     button.addEventListener("click", () => {
       button.form.dataset.locationReady = "yes";
+    });
+  });
+
+  document.querySelectorAll("form[data-location-edit]").forEach(form => {
+    showLocationPreview(form, {
+      latitude: Number(form.dataset.locationLatitude),
+      longitude: Number(form.dataset.locationLongitude),
+    });
+    form.querySelector("[data-location-recapture]").addEventListener("click", async () => {
+      const status = form.querySelector("[data-location-status]");
+      if (status) status.textContent = "Getting your current location…";
+      try {
+        const position = await currentPosition();
+        showLocationPreview(form, {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+        });
+        if (status) status.textContent = "Check the center dot and radius handle, then save your changes.";
+      } catch (error) {
+        if (status) status.textContent = "Location was not shared, so this saved location was not changed.";
+      }
     });
   });
 })();

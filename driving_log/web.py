@@ -255,7 +255,9 @@ def _is_read_only(request: Request) -> bool:
 
 
 def _is_mutation_page(path: str) -> bool:
-    return path in MUTATION_PAGE_PATHS or (path.startswith("/drives/") and path.endswith("/edit"))
+    return path in MUTATION_PAGE_PATHS or (
+        (path.startswith("/drives/") or path.startswith("/locations/")) and path.endswith("/edit")
+    )
 
 
 def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
@@ -830,6 +832,32 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         form = await read_form(request)
         locations.delete(
             location_id,
+            request_id=str(form["request_id"]),
+            actor_identity=_actor(request),
+        )
+        return redirect("/locations")
+
+    @app.get("/locations/{location_id}/edit", response_class=HTMLResponse)
+    async def saved_location_edit_page(request: Request, location_id: str) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "location_edit.html",
+            common(
+                request,
+                title="Edit saved location",
+                location=locations.get(location_id),
+            ),
+        )
+
+    @app.post("/locations/{location_id}/edit")
+    async def saved_location_edit(request: Request, location_id: str) -> RedirectResponse:
+        form = await read_form(request)
+        locations.update(
+            location_id,
+            name=str(form.get("name", "")),
+            latitude=float(str(form["latitude"])),
+            longitude=float(str(form["longitude"])),
+            radius_meters=int(str(form.get("radius_meters", ""))),
             request_id=str(form["request_id"]),
             actor_identity=_actor(request),
         )
