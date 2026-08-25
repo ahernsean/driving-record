@@ -61,18 +61,19 @@
     </article>
   {% endfor %}
 
-  <h2>Add license information</h2>
+  {% if missing_supervisor_options %}<h2>Add license information</h2>
   <form class="stacked-form" method="post" action="/dmv/profiles" data-async-submit>
     <input type="hidden" name="request_id" value="{{ '83000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     <label>Name
       <select required name="display_name">
         <option value="" disabled selected>Choose a supervising driver</option>
-        {% for name in supervisor_options %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+        {% for name in missing_supervisor_options %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
       </select>
     </label>
     <label>Driver license number<input required autocomplete="off" name="dl_number"></label>
     <label>State<input required maxlength="2" autocapitalize="characters" name="dl_state" placeholder="NC"></label>
     <button class="primary" type="submit">Save supervising driver</button>
   </form>
+  {% endif %}
   {% endif %}
 {% endblock %}

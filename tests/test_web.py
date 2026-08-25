@@ -1368,6 +1368,13 @@ class WebTests(unittest.TestCase):
                 profile_page = await client.get("/dmv")
                 self.assertIn("••••••••••1234", profile_page.text)
                 self.assertIn("SYNTHETIC-1234", profile_page.text)
+                add_form = re.search(
+                    r"<h2>Add license information</h2>(.*?)</form>", profile_page.text, re.DOTALL
+                )
+                self.assertIsNotNone(add_form)
+                add_form_text = add_form.group(1) if add_form else ""
+                self.assertNotIn('value="Sean Ahern"', add_form_text)
+                self.assertIn('value="Jen Ahern"', add_form_text)
                 profile_id = re.search(r'name="profile_id" value="([^"]+)"', profile_page.text)
                 self.assertIsNotNone(profile_id)
                 selected_profile_id = profile_id.group(1)  # type: ignore[union-attr]
@@ -1406,6 +1413,18 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(len(reader.pages), 2)
                 text = "\n".join(page.extract_text() or "" for page in reader.pages)
                 self.assertIn("UPDATED-5678, NC", text)
+                for name in ("Jen Ahern", "Bethany O'Banion"):
+                    created_profile = await client.post(
+                        "/dmv/profiles",
+                        data={
+                            "request_id": str(uuid.uuid4()),
+                            "display_name": name,
+                            "dl_number": f"SYNTHETIC-{name[0]}234",
+                            "dl_state": "NC",
+                        },
+                    )
+                    self.assertEqual(created_profile.status_code, 303)
+                self.assertNotIn("Add license information", (await client.get("/dmv")).text)
                 deleted = await client.post(
                     f"/dmv/profiles/{selected_profile_id}/delete",
                     data={"request_id": str(uuid.uuid4()), "version": "2"},

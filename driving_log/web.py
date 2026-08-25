@@ -23,7 +23,12 @@ from driving_log.auth import ACCOUNTS, COOKIE_NAME, SESSION_LIFETIME_SECONDS, Au
 from driving_log.config import Settings
 from driving_log.csv_backup import export_csv, import_csv
 from driving_log.db import Database
-from driving_log.dmv import DmvExportService, SupervisorProfileService, mask_license
+from driving_log.dmv import (
+    DmvExportService,
+    SupervisorProfileService,
+    mask_license,
+    normalize_supervisor_name,
+)
 from driving_log.live import MINIMUM_DRIVE_SECONDS, LiveDriveService
 from driving_log.locations import SavedLocationService
 from driving_log.records import ConflictError, DriveInput, NotFoundError, RecordService
@@ -1232,6 +1237,14 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             }
             for profile in profiles.list_profiles()
         ]
+        profiled_names = {
+            normalize_supervisor_name(str(profile["display_name"])) for profile in stored_profiles
+        }
+        missing_supervisor_options = tuple(
+            name
+            for name in AUTH_SUPERVISORS
+            if normalize_supervisor_name(name) not in profiled_names
+        )
         return templates.TemplateResponse(
             request,
             "dmv.html",
@@ -1240,6 +1253,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 title="DMV driving record",
                 profiles=stored_profiles,
                 supervisor_options=AUTH_SUPERVISORS,
+                missing_supervisor_options=missing_supervisor_options,
                 review=dmv.review(),
             ),
         )
