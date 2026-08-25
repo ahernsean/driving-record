@@ -1354,6 +1354,17 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertEqual(created.status_code, 303)
                 self.assertEqual(created.headers["location"], "/dmv")
+                invalid_name = await client.post(
+                    "/dmv/profiles",
+                    data={
+                        "request_id": str(uuid.uuid4()),
+                        "display_name": "Sean Aherm",
+                        "dl_number": "SYNTHETIC-9999",
+                        "dl_state": "NC",
+                    },
+                )
+                self.assertEqual(invalid_name.status_code, 400)
+                self.assertIn("Choose a configured supervising driver", invalid_name.text)
                 profile_page = await client.get("/dmv")
                 self.assertIn("••••••••••1234", profile_page.text)
                 self.assertIn("SYNTHETIC-1234", profile_page.text)

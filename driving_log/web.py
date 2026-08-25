@@ -1249,8 +1249,11 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         form = await read_form(request)
         profile_id = str(form.get("profile_id", "")).strip() or None
         expected_text = str(form.get("version", "")).strip()
+        display_name = str(form["display_name"])
+        if display_name not in AUTH_SUPERVISORS:
+            raise ValueError("Choose a configured supervising driver")
         profiles.save(
-            display_name=str(form["display_name"]),
+            display_name=display_name,
             dl_number=str(form["dl_number"]),
             dl_state=str(form["dl_state"]),
             request_id=str(form["request_id"]),
