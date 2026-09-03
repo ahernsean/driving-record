@@ -485,6 +485,29 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert recovered.locator('input[name="acknowledge_warnings"]').count() == 0
                 assert recovered.locator('input[name="supervisor_dl_number"]').count() == 0
                 assert recovered.locator('input[name="supervisor_dl_state"]').count() == 0
+                recovered.get_by_role("button", name="Save completed drive").click()
+                recovered.get_by_role("heading", name="Student progress").wait_for()
+                for grouping in (
+                    "date",
+                    "supervisor",
+                    "day_night",
+                    "part_of_day",
+                    "road_type",
+                    "weather",
+                    "duration",
+                ):
+                    recovered.goto(f"{url}/drives?group_by={grouping}")
+                    group = recovered.locator("details[data-drive-group-key]").first
+                    group.locator("summary").click()
+                    assert group.get_attribute("open") == ""
+                    recovered.reload()
+                    recovered.get_by_role("heading", name="Drive history").wait_for()
+                    assert group.get_attribute("open") == ""
+                    group.locator(".drive-row").click()
+                    recovered.get_by_role("heading", name="Drive details").wait_for()
+                    recovered.go_back()
+                    recovered.get_by_role("heading", name="Drive history").wait_for()
+                    assert group.get_attribute("open") == ""
                 recovered.goto(f"{url}/dmv")
                 recovered.locator('select[name="display_name"]').select_option("Sean Ahern")
                 recovered.locator('input[name="dl_number"]').fill("SYNTHETIC-1234")

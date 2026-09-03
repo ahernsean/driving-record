@@ -80,7 +80,7 @@
   {% if groups %}
     <div class="drive-groups">
       {% for group in groups %}
-        <details class="drive-group">
+        <details class="drive-group" data-drive-group-key="{{ group.key }}">
           <summary><span class="group-label">{{ group.label }}</span><small>{{ group.drives | length }} drive{{ "" if group.drives|length == 1 else "s" }} · {{ format_minutes(group.minutes) }} · {{ group.percentage }}% of total<br>{% if group.day_minutes and group.night_minutes %}{{ format_minutes(group.day_minutes) }} day · {{ format_minutes(group.night_minutes) }} night{% elif group.day_minutes %}{{ format_minutes(group.day_minutes) }} day{% else %}{{ format_minutes(group.night_minutes) }} night{% endif %}</small></summary>
           <div class="drive-list">{% for item in group.drives %}{{ drive_row(item) }}{% endfor %}</div>
         </details>
