@@ -27,7 +27,6 @@
   </section>
 
   {% if not is_read_only %}<h2>Supervising drivers</h2>
-  <p class="muted">License details are stored in the private database and full-state archives. They are not included in CSV backups.</p>
   {% for profile in profiles %}
     <article class="detail-card profile-card">
       <strong>{{ profile.display_name }}</strong>
@@ -38,7 +37,16 @@
           <input type="hidden" name="request_id" value="{{ '81000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
           <input type="hidden" name="profile_id" value="{{ profile.id }}">
           <input type="hidden" name="version" value="{{ profile.version }}">
-          <label>Name<input required name="display_name" value="{{ profile.display_name }}"></label>
+          <label>Name
+            <select required name="display_name">
+              {% for name in supervisor_options %}
+                <option value="{{ name }}" {{ "selected" if name == profile.display_name }}>{{ name }}</option>
+              {% endfor %}
+              {% if profile.display_name not in supervisor_options %}
+                <option value="{{ profile.display_name }}" selected>{{ profile.display_name }}</option>
+              {% endif %}
+            </select>
+          </label>
           <label>Driver license number<input required autocomplete="off" name="dl_number" value="{{ profile.dl_number }}"></label>
           <label>State<input required maxlength="2" autocapitalize="characters" name="dl_state" value="{{ profile.dl_state }}"></label>
           <button class="primary" type="submit">Save changes</button>
@@ -52,18 +60,19 @@
     </article>
   {% endfor %}
 
-  <h2>Add license information</h2>
+  {% if missing_supervisor_options %}<h2 id="add-license-information">Add license information</h2>
   <form class="stacked-form" method="post" action="/dmv/profiles" data-async-submit>
     <input type="hidden" name="request_id" value="{{ '83000000-0000-4000-8000-' ~ range(100000000000,999999999999)|random }}">
     <label>Name
-      <input required name="display_name" list="drive-supervisor-names">
-      <datalist id="drive-supervisor-names">
-        {% for name in drive_supervisors %}<option value="{{ name }}">{% endfor %}
-      </datalist>
+      <select required name="display_name">
+        <option value="" disabled selected>Choose a supervising driver</option>
+        {% for name in missing_supervisor_options %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      </select>
     </label>
     <label>Driver license number<input required autocomplete="off" name="dl_number"></label>
     <label>State<input required maxlength="2" autocapitalize="characters" name="dl_state" placeholder="NC"></label>
     <button class="primary" type="submit">Save supervising driver</button>
   </form>
+  {% endif %}
   {% endif %}
 {% endblock %}

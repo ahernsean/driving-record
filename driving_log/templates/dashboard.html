@@ -80,6 +80,7 @@
     {% endif %}
     {% if not is_read_only %}<a class="button" href="/drives/new">Add drive</a>{% endif %}
     <a class="button" href="/drives">View drives</a>
+    {% if show_license_shortcut %}<a class="button" href="/dmv#add-license-information">Add driver license information</a>{% endif %}
     <a class="button secondary" href="/imports">Import or export</a>
   </section>
 {% endblock %}

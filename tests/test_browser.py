@@ -486,7 +486,7 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert recovered.locator('input[name="supervisor_dl_number"]').count() == 0
                 assert recovered.locator('input[name="supervisor_dl_state"]').count() == 0
                 recovered.goto(f"{url}/dmv")
-                recovered.locator('input[name="display_name"]').fill("Sean Ahern")
+                recovered.locator('select[name="display_name"]').select_option("Sean Ahern")
                 recovered.locator('input[name="dl_number"]').fill("SYNTHETIC-1234")
                 recovered.locator('input[name="dl_state"]').fill("NC")
                 with recovered.expect_navigation():

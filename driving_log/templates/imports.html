@@ -11,6 +11,7 @@
       <button type="submit">Review and import</button>
     </form>{% endif %}
   </section>
+  <p class="muted">License details are stored in the private database and full-state archives. They are not included in CSV backups.</p>
   <h2>Import history</h2>
   <div class="drive-list">
     {% for batch in batches %}<article class="drive-row"><strong>{{ batch.source_name }}</strong><span>{{ batch.status }}</span><small>{{ format_local_datetime(batch.imported_at) }}</small></article>
