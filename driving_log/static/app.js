@@ -333,6 +333,33 @@
     });
   });
 
+  const driveGroups = document.querySelectorAll("details[data-drive-group-key]");
+  if (driveGroups.length) {
+    const storageKey = `driving-log:expanded-drive-groups:${location.pathname}${location.search}`;
+    let expanded = new Set();
+    try {
+      expanded = new Set(JSON.parse(sessionStorage.getItem(storageKey) || "[]"));
+    } catch (_) {
+      // Storage may be unavailable in private browsing or under a strict policy.
+    }
+    const saveExpanded = () => {
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify([...expanded]));
+      } catch (_) {
+        // The disclosure still works for this page when persistence is unavailable.
+      }
+    };
+    driveGroups.forEach(group => {
+      const key = group.dataset.driveGroupKey;
+      if (expanded.has(key)) group.open = true;
+      group.addEventListener("toggle", () => {
+        if (group.open) expanded.add(key);
+        else expanded.delete(key);
+        saveExpanded();
+      });
+    });
+  }
+
   document.querySelectorAll("[data-cancel-form]").forEach(link => {
     const form = document.getElementById(link.dataset.cancelForm);
     if (!form) return;
