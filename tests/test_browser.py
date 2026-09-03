@@ -500,6 +500,9 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     group = recovered.locator("details[data-drive-group-key]").first
                     group.locator("summary").click()
                     assert group.get_attribute("open") == ""
+                    recovered.reload()
+                    recovered.get_by_role("heading", name="Drive history").wait_for()
+                    assert group.get_attribute("open") == ""
                     group.locator(".drive-row").click()
                     recovered.get_by_role("heading", name="Drive details").wait_for()
                     recovered.go_back()
