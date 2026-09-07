@@ -56,7 +56,8 @@
     </div>
   </section>
   <section class="stats">
-    <article><span>Remaining</span><strong>{{ format_minutes([0, 3600 - totals.total_minutes] | max) }}</strong></article>
+    <article><span>Total remaining</span><strong>{{ format_minutes([0, 3600 - totals.total_minutes] | max) }}</strong></article>
+    <article><span>Nighttime remaining</span><strong>{{ format_minutes([0, 600 - totals.night_minutes] | max) }}</strong></article>
     <article><span>Recorded drives</span><strong>{{ totals.drive_count }}</strong></article>
   </section>
   {% if overages %}
