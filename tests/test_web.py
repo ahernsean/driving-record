@@ -578,7 +578,7 @@ class WebTests(unittest.TestCase):
                 self.assertNotIn("0h 0m day", listing.text)
                 dashboard = await client.get("/")
                 self.assertIn(
-                    'aria-label="2 percent of required driving completed"', dashboard.text
+                    'aria-label="2 percent of driving requirements completed"', dashboard.text
                 )
                 self.assertIn(">2%</text>", dashboard.text)
                 self.assertNotIn("1.7%", dashboard.text)
@@ -1151,7 +1151,7 @@ class WebTests(unittest.TestCase):
 
         self.run_async(scenario)
 
-    def test_dashboard_progress_rounds_half_up_without_early_completion(self) -> None:
+    def test_dashboard_progress_accounts_for_total_and_night_requirements(self) -> None:
         async def scenario() -> None:
             async with (
                 self.app.router.lifespan_context(self.app),
@@ -1178,7 +1178,7 @@ class WebTests(unittest.TestCase):
                     )
                     self.assertEqual(response.status_code, 303)
 
-                async def add_night_drive(day: int) -> None:
+                async def add_night_drive(day: int, duration_hours: float) -> None:
                     start = datetime(2026, 7, day, 22, tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
                     response = await client.post(
                         "/drives",
@@ -1186,7 +1186,7 @@ class WebTests(unittest.TestCase):
                             "request_id": str(uuid.uuid4()),
                             "driver_name": "Daniel Ahern",
                             "started_at_local": start.strftime("%Y-%m-%dT%H:%M"),
-                            "ended_at_local": (start + timedelta(hours=8)).strftime(
+                            "ended_at_local": (start + timedelta(hours=duration_hours)).strftime(
                                 "%Y-%m-%dT%H:%M"
                             ),
                             "road_type": "local",
@@ -1197,43 +1197,43 @@ class WebTests(unittest.TestCase):
                 await add_drive(1, 18)
                 dashboard = await client.get("/")
                 self.assertIn(
-                    'aria-label="1 percent of required driving completed"', dashboard.text
+                    'aria-label="1 percent of driving requirements completed"', dashboard.text
                 )
                 self.assertIn(">1%</text>", dashboard.text)
 
                 await add_drive(2, 72)
                 dashboard = await client.get("/")
                 self.assertIn(
-                    'aria-label="3 percent of required driving completed"', dashboard.text
+                    'aria-label="3 percent of driving requirements completed"', dashboard.text
                 )
                 self.assertIn(">3%</text>", dashboard.text)
 
-                for day in range(3, 13):
+                for day in range(3, 12):
                     await add_drive(day, 300)
-                await add_drive(13, 300)
-                await add_drive(14, 209)
+                await add_drive(12, 90)
+                await add_night_drive(13, 6.5)
                 dashboard = await client.get("/")
                 self.assertIn(
-                    'aria-label="99 percent of required driving completed"', dashboard.text
+                    'aria-label="91 percent of driving requirements completed"', dashboard.text
                 )
-                self.assertIn(">99%</text>", dashboard.text)
+                self.assertIn(">91%</text>", dashboard.text)
+                self.assertIn(">TO COMPLETE</text>", dashboard.text)
 
-                await add_drive(15, 1)
+                await add_drive(14, 330)
                 dashboard = await client.get("/")
                 self.assertIn(
-                    'aria-label="100 percent of required driving completed"', dashboard.text
+                    'aria-label="94 percent of driving requirements completed"', dashboard.text
+                )
+                self.assertIn(">94%</text>", dashboard.text)
+
+                await add_night_drive(16, 3.5)
+                await add_drive(18, 288)
+                dashboard = await client.get("/")
+                self.assertIn(
+                    'aria-label="100 percent of driving requirements completed"', dashboard.text
                 )
                 self.assertIn(">100%</text>", dashboard.text)
-
-                await add_drive(16, 288)
-                await add_night_drive(20)
-                await add_night_drive(22)
-                await add_night_drive(24)
-                dashboard = await client.get("/")
-                self.assertIn(
-                    'aria-label="148 percent of required driving completed"', dashboard.text
-                )
-                self.assertIn(">148%</text>", dashboard.text)
+                self.assertIn(">REQUIREMENTS MET</text>", dashboard.text)
                 self.assertIn(
                     "<span>Total driving</span>\n            <span>Remaining: 0h 00m</span>",
                     dashboard.text,
