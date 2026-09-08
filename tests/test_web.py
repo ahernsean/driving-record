@@ -1234,8 +1234,16 @@ class WebTests(unittest.TestCase):
                     'aria-label="148 percent of required driving completed"', dashboard.text
                 )
                 self.assertIn(">148%</text>", dashboard.text)
-                self.assertIn(">Total remaining</span><strong>0h 00m</strong>", dashboard.text)
-                self.assertIn(">Nighttime remaining</span><strong>0h 00m</strong>", dashboard.text)
+                self.assertIn(
+                    "<span>Total driving</span>\n            <span>Remaining: 0h 00m</span>",
+                    dashboard.text,
+                )
+                self.assertIn(
+                    "<span>Night driving</span>\n            <span>Remaining: 0h 00m</span>",
+                    dashboard.text,
+                )
+                self.assertNotIn("Total remaining", dashboard.text)
+                self.assertNotIn("Nighttime remaining", dashboard.text)
 
         self.run_async(scenario)
 

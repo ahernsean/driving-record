@@ -43,6 +43,7 @@
           <div>
             <p><strong>{{ format_minutes(totals.total_minutes) }}</strong><small> / 60h</small></p>
             <span>Total driving</span>
+            <span>Remaining: {{ format_minutes([0, 3600 - totals.total_minutes] | max) }}</span>
           </div>
         </article>
         <article>
@@ -50,14 +51,13 @@
           <div>
             <p><strong>{{ format_minutes(totals.night_minutes) }}</strong><small> / 10h</small></p>
             <span>Night driving</span>
+            <span>Remaining: {{ format_minutes([0, 600 - totals.night_minutes] | max) }}</span>
           </div>
         </article>
       </div>
     </div>
   </section>
   <section class="stats">
-    <article><span>Total remaining</span><strong>{{ format_minutes([0, 3600 - totals.total_minutes] | max) }}</strong></article>
-    <article><span>Nighttime remaining</span><strong>{{ format_minutes([0, 600 - totals.night_minutes] | max) }}</strong></article>
     <article><span>Recorded drives</span><strong>{{ totals.drive_count }}</strong></article>
   </section>
   {% if overages %}
