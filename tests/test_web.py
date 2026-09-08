@@ -1178,6 +1178,22 @@ class WebTests(unittest.TestCase):
                     )
                     self.assertEqual(response.status_code, 303)
 
+                async def add_night_drive(day: int) -> None:
+                    start = datetime(2026, 7, day, 22, tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
+                    response = await client.post(
+                        "/drives",
+                        data={
+                            "request_id": str(uuid.uuid4()),
+                            "driver_name": "Daniel Ahern",
+                            "started_at_local": start.strftime("%Y-%m-%dT%H:%M"),
+                            "ended_at_local": (start + timedelta(hours=8)).strftime(
+                                "%Y-%m-%dT%H:%M"
+                            ),
+                            "road_type": "local",
+                        },
+                    )
+                    self.assertEqual(response.status_code, 303)
+
                 await add_drive(1, 18)
                 dashboard = await client.get("/")
                 self.assertIn(
@@ -1210,11 +1226,24 @@ class WebTests(unittest.TestCase):
                 self.assertIn(">100%</text>", dashboard.text)
 
                 await add_drive(16, 288)
+                await add_night_drive(20)
+                await add_night_drive(22)
+                await add_night_drive(24)
                 dashboard = await client.get("/")
                 self.assertIn(
-                    'aria-label="108 percent of required driving completed"', dashboard.text
+                    'aria-label="148 percent of required driving completed"', dashboard.text
                 )
-                self.assertIn(">108%</text>", dashboard.text)
+                self.assertIn(">148%</text>", dashboard.text)
+                self.assertIn(
+                    "<span>Total driving</span>\n            <span>Remaining: 0h 00m</span>",
+                    dashboard.text,
+                )
+                self.assertIn(
+                    "<span>Night driving</span>\n            <span>Remaining: 0h 00m</span>",
+                    dashboard.text,
+                )
+                self.assertNotIn("Total remaining", dashboard.text)
+                self.assertNotIn("Nighttime remaining", dashboard.text)
 
         self.run_async(scenario)
 
