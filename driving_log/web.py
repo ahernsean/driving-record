@@ -127,6 +127,7 @@ GROUP_BY_OPTIONS = (
 )
 AUTH_SUPERVISORS = (ACCOUNTS["sean"], ACCOUNTS["jen"], ACCOUNTS["bethany"])
 MUTATION_PAGE_PATHS = frozenset({"/drives/new", "/live", "/archives", "/locations"})
+VIEW_ONLY_DOWNLOAD_PATHS = frozenset({"/csv/export", "/dmv/export"})
 
 
 def _part_of_day(value: str | datetime, timezone_name: str) -> str:
@@ -322,6 +323,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
                 and (
                     request.method not in {"GET", "HEAD", "OPTIONS"}
                     or _is_mutation_page(request.url.path)
+                    or request.url.path in VIEW_ONLY_DOWNLOAD_PATHS
                 )
             ):
                 return JSONResponse({"detail": "view-only account"}, status_code=403)
