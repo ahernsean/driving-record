@@ -390,6 +390,8 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                 assert smallest_button >= 44
                 page.get_by_role("link", name="Import or export").click()
                 csv_download = page.get_by_role("link", name="Download CSV backup")
+                expected_filename = csv_download.get_attribute("data-export-filename")
+                assert expected_filename is not None
                 csv_download.click()
                 page.get_by_role("link", name="Save CSV backup").wait_for()
                 assert page.url == f"{url}/imports"
@@ -398,7 +400,9 @@ def test_mobile_webkit_live_drive_recovery() -> None:
                     in page.locator("[data-export-status]").text_content()
                 )
                 page.get_by_role("link", name="Save CSV backup").click()
-                page.wait_for_function("window.sharedExportName === 'driving-log.csv'")
+                page.wait_for_function(
+                    "expected => window.sharedExportName === expected", arg=expected_filename
+                )
                 assert page.evaluate("window.sharedExportKeys") == ["files"]
                 assert page.url == f"{url}/imports"
                 page.get_by_role("link", name="History").click()

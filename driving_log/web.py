@@ -80,6 +80,11 @@ def _format_local_date(value: str | datetime) -> str:
     return f"{local.strftime('%A')}, {local.strftime('%b')} {local.day}, {local.year}"
 
 
+def _csv_export_filename(today: date | None = None) -> str:
+    export_date = today or datetime.now(ZONE).date()
+    return f"driving-log-{export_date.isoformat()}.csv"
+
+
 def _format_date_in_zone(value: str | datetime, timezone_name: str) -> str:
     local = _local_datetime_in_zone(value, timezone_name)
     return f"{local.strftime('%A')}, {local.strftime('%b')} {local.day}, {local.year}"
@@ -1218,7 +1223,12 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
         return templates.TemplateResponse(
             request,
             "imports.html",
-            common(request, title="Imports and exports", batches=batches),
+            common(
+                request,
+                title="Imports and exports",
+                batches=batches,
+                csv_export_filename=_csv_export_filename(),
+            ),
         )
 
     @app.get("/csv/export")
@@ -1227,7 +1237,7 @@ def register_web(app: FastAPI, settings: Settings, database: Database) -> None:
             export_csv(database),
             media_type="text/csv; charset=utf-8",
             headers={
-                "Content-Disposition": 'attachment; filename="driving-log.csv"',
+                "Content-Disposition": f'attachment; filename="{_csv_export_filename()}"',
                 "Cache-Control": "no-store",
             },
         )

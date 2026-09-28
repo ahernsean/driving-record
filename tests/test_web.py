@@ -10,7 +10,7 @@ import sqlite3
 import tempfile
 import unittest
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -27,6 +27,7 @@ from driving_log.db import utc_now_text
 from driving_log.migrations import LATEST_SCHEMA_VERSION
 from driving_log.records import DriveInput, RecordService
 from driving_log.web import (
+    _csv_export_filename,
     _drive_group_key,
     _duration_bucket,
     _format_local_datetime,
@@ -61,6 +62,9 @@ class WebTests(unittest.TestCase):
 
     def run_async(self, function: object) -> None:
         anyio.run(function)  # type: ignore[arg-type]
+
+    def test_csv_export_filename_uses_iso_current_date(self) -> None:
+        self.assertEqual(_csv_export_filename(date(2026, 9, 28)), "driving-log-2026-09-28.csv")
 
     def test_saved_locations_can_be_configured_and_removed(self) -> None:
         async def scenario() -> None:
@@ -654,12 +658,17 @@ class WebTests(unittest.TestCase):
                 )
                 self.assertIn('href="/archives">Archives</a>', imports.text)
                 self.assertIn(
-                    'href="/csv/export" data-file-export data-export-filename="driving-log.csv"',
+                    'href="/csv/export" data-file-export data-export-filename="'
+                    f'{_csv_export_filename()}"',
                     imports.text,
                 )
                 csv_export = await client.get("/csv/export")
                 self.assertEqual(csv_export.status_code, 200)
                 self.assertIn("text/csv", csv_export.headers["content-type"])
+                self.assertEqual(
+                    csv_export.headers["content-disposition"],
+                    f'attachment; filename="{_csv_export_filename()}"',
+                )
 
         self.run_async(scenario)
 
