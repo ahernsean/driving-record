@@ -271,7 +271,7 @@ class WebTests(unittest.TestCase):
 
         self.run_async(scenario)
 
-    def test_daniel_has_read_only_access_and_can_export_records(self) -> None:
+    def test_daniel_has_read_only_access_without_downloads(self) -> None:
         settings = Settings(
             state_dir=self.settings.state_dir,
             database_path=self.settings.database_path,
@@ -352,15 +352,12 @@ class WebTests(unittest.TestCase):
                     self.assertEqual(
                         (await daniel.get(f"/drives/{drive_id}/edit")).status_code, 403
                     )
-                    self.assertEqual((await daniel.get("/csv/export")).status_code, 200)
-                    self.assertEqual((await daniel.get("/dmv/export")).status_code, 200)
+                    self.assertEqual((await daniel.get("/csv/export")).status_code, 403)
                     dmv_page = await daniel.get("/dmv")
-                    self.assertIn("Download filled DL-4A PDF", dmv_page.text)
-                    self.assertIn(
-                        'href="/dmv/export" data-file-export '
-                        'data-export-filename="Daniel-driving-log-DL-4A.pdf"',
-                        dmv_page.text,
-                    )
+                    self.assertEqual((await daniel.get("/dmv/export")).status_code, 403)
+                    self.assertNotIn("Download filled DL-4A PDF", dmv_page.text)
+                    imports = await daniel.get("/imports")
+                    self.assertNotIn("Download CSV backup", imports.text)
                     self.assertNotIn("Add license information", dmv_page.text)
                     self.assertEqual(
                         (
